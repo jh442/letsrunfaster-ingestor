@@ -19,9 +19,9 @@ A tool to securely authenticate with Garmin Connect, query activities within any
 Each tagged release (`git tag v0.1.0 && git push --tags`) automatically builds
 a double-clickable binary via GitHub Actions (`.github/workflows/build.yml`):
 
-- **Windows**: `GarminIngestor.exe`
-- **macOS**: `GarminIngestor-macos-arm64` (Apple Silicon) / `GarminIngestor-macos-x64` (Intel)
-- **Linux**: `GarminIngestor`
+- **Windows**: `LrfIngestor.exe`
+- **macOS**: `LrfIngestor-macos-arm64` (Apple Silicon) / `LrfIngestor-macos-x64` (Intel)
+- **Linux**: `LrfIngestor`
 
 Just download it from the **Releases** page and double-click it — your browser
 opens with the full UI (login, activity list, export with live progress).
@@ -35,16 +35,16 @@ close it (or Ctrl-C) to stop.
 The same binary also works as a CLI when run with arguments:
 
 ```bash
-GarminIngestor status
-GarminIngestor export --start 2025-01-01 --end 2025-06-01 --format fit --output ./my_exports
+LrfIngestor status
+LrfIngestor export --start 2025-01-01 --end 2025-06-01 --format fit --output ./my_exports
 ```
 
 ### Build It Yourself
 
 ```bash
 pip install pyinstaller
-pyinstaller garmin-ingestor.spec
-# Output: dist/GarminIngestor (double-click, or run with CLI args)
+pyinstaller lrf-ingestor.spec
+# Output: dist/LrfIngestor (double-click, or run with CLI args)
 ```
 
 ## Installation (Python)

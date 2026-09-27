@@ -6,7 +6,7 @@ on:
       - "v*"
   pull_request:
     paths:
-      - "garmin-ingestor.spec"
+      - "lrf-ingestor.spec"
       - "garmin_engine/launcher.py"
       - "garmin_engine/**"
       - ".github/workflows/build.yml"
@@ -19,11 +19,11 @@ jobs:
       matrix:
         include:
           - os: windows-latest
-            artifact: GarminIngestor.exe
+            artifact: LrfIngestor.exe
           - os: macos-latest
-            artifact: GarminIngestor
+            artifact: LrfIngestor
           - os: ubuntu-latest
-            artifact: GarminIngestor
+            artifact: LrfIngestor
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -42,7 +42,7 @@ jobs:
         run: python -m unittest discover tests
 
       - name: Build one-file binary
-        run: pyinstaller garmin-ingestor.spec
+        run: pyinstaller lrf-ingestor.spec
 
       - name: Rename macOS binary per arch
         if: runner.os == 'macOS'
@@ -51,16 +51,16 @@ jobs:
           cd dist
           ARCH=$(uname -m)
           if [ "$ARCH" = "arm64" ]; then
-            mv GarminIngestor GarminIngestor-macos-arm64
+            mv LrfIngestor LrfIngestor-macos-arm64
           else
-            mv GarminIngestor GarminIngestor-macos-x64
+            mv LrfIngestor LrfIngestor-macos-x64
           fi
           ls -la
 
       - name: Upload binary artifact
         uses: actions/upload-artifact@v4
         with:
-          name: GarminIngestor-${{ runner.os }}
+          name: LrfIngestor-${{ runner.os }}
           path: dist/*
           if-no-files-found: error
 

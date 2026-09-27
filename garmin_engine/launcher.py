@@ -4,7 +4,7 @@ Behavior:
 - No arguments (e.g. user double-clicks the bundled app): start the local
   web server and open the browser UI. Stays running until the user closes
   the window / presses Ctrl-C.
-- With arguments (e.g. ``GarminIngestor export --start ...``): behave exactly
+- With arguments (e.g. ``LrfIngestor export --start ...``): behave exactly
   like the ``garmin-ingestor`` CLI.
 
 This module is the entry point for the PyInstaller one-file build so a user
