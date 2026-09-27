@@ -1,0 +1,732 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>LetsRunFaster Ingestor</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet">
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            brand: {
+              orange: '#f95721',
+              'orange-hover': '#ea4a14',
+              cyan: '#00e5ff',
+              cyanDark: '#0891b2',
+              card: '#121722',
+              cardBorder: '#1c2435',
+              bg: '#0b0e14',
+              input: '#0d111a',
+              inputBorder: '#1e2639',
+              gold: '#f59e0b',
+            }
+          }
+        }
+      }
+    }
+  </script>
+  <style>
+    body { font-family: 'Plus Jakarta Sans', sans-serif; }
+    .font-display, h1, h2, h3 { font-family: 'Space Grotesk', 'Plus Jakarta Sans', sans-serif; }
+    @keyframes pulse-slow { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
+    .animate-pulse-slow { animation: pulse-slow 2s cubic-bezier(0.4, 0, 0.6, 1) infinite; }
+    
+    /* Sleek custom scrollbar */
+    ::-webkit-scrollbar { width: 6px; height: 6px; }
+    ::-webkit-scrollbar-track { background: #0b0e14; }
+    ::-webkit-scrollbar-thumb { background: #1c2435; border-radius: 3px; }
+    ::-webkit-scrollbar-thumb:hover { background: #2d3952; }
+  </style>
+</head>
+<body class="bg-[#0b0e14] text-slate-100 min-h-screen antialiased selection:bg-[#f95721] selection:text-white">
+  <div class="max-w-6xl mx-auto px-4 sm:px-6 py-8">
+
+    <!-- Header -->
+    <header class="flex flex-col sm:flex-row sm:items-center justify-between pb-6 border-b border-white/[0.06] mb-8 gap-4">
+      <div class="flex items-center">
+        <div>
+          <div class="flex items-center space-x-2">
+            <h1 class="text-2xl font-black tracking-tighter text-white font-display italic">
+              LETS<span class="text-orange-500">RUN</span>FASTER<span class="text-slate-400 not-italic font-bold ml-2 text-lg tracking-tight">INGESTOR</span>
+            </h1>
+          </div>
+          <p class="text-xs text-slate-400 mt-0.5">Bulk export garmin activities</p>
+        </div>
+      </div>
+
+      <div id="user-badge" class="flex items-center space-x-3">
+        <span class="inline-flex items-center px-3 py-1 rounded-full text-xs font-medium bg-[#121722] text-slate-400 border-0">
+          <span class="w-2 h-2 mr-2 rounded-full bg-slate-500"></span> Checking status...
+        </span>
+      </div>
+    </header>
+
+    <!-- Main Grid -->
+    <div class="grid grid-cols-1 lg:grid-cols-3 gap-8 items-start">
+
+      <!-- Left Column: Controls & Auth -->
+      <div class="lg:col-span-1 space-y-6">
+
+        <!-- Auth Card -->
+        <div id="auth-card" class="bg-[#111827] border-0 rounded-2xl p-6 shadow-2xl relative overflow-hidden space-y-4">
+          <div class="flex items-center justify-between">
+            <h2 class="text-xs font-black uppercase tracking-wider flex items-center text-[#f95721]">
+              <i class="fa-solid fa-shield-halved mr-2 text-base text-[#f95721]"></i> Garmin Connect
+            </h2>
+            <span id="auth-badge-status" class="px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider bg-slate-800 text-slate-400 border-0 whitespace-nowrap">
+              Auth
+            </span>
+          </div>
+
+          <div id="auth-form-container">
+            <form id="login-form" class="space-y-4">
+              <div>
+                <label class="block text-[11px] font-bold uppercase tracking-wider text-slate-400 mb-1.5">Garmin Email</label>
+                <input id="login-email" type="email" required placeholder="runner@example.com"
+                  class="w-full bg-[#182234] border border-transparent focus:border-sky-500 focus:ring-1 focus:ring-sky-500 rounded-xl px-4 py-2.5 text-sm text-white placeholder-slate-500 transition-all outline-none">
+              </div>
+              <div>
+                <label class="block text-[11px] font-bold uppercase tracking-wider text-slate-400 mb-1.5">Password</label>
+                <input id="login-password" type="password" required placeholder="••••••••"
+                  class="w-full bg-[#182234] border border-transparent focus:border-sky-500 focus:ring-1 focus:ring-sky-500 rounded-xl px-4 py-2.5 text-sm text-white placeholder-slate-500 transition-all outline-none">
+              </div>
+              <button type="submit" id="btn-login"
+                class="w-full py-2.5 rounded-xl bg-[#f95721] hover:bg-[#ea4a14] active:scale-95 text-white text-xs font-extrabold uppercase tracking-wider shadow-lg shadow-orange-500/20 transition flex items-center justify-center space-x-2">
+                <span>Connect Account</span>
+                <i class="fa-solid fa-arrow-right text-[10px]"></i>
+              </button>
+            </form>
+          </div>
+
+          <!-- MFA Container (Hidden initially) -->
+          <div id="mfa-container" class="hidden space-y-4 pt-1">
+            <div class="p-3 bg-amber-500/10 border-0 rounded-xl text-xs text-amber-300">
+              <i class="fa-solid fa-key mr-1.5"></i> Garmin sent a 6-digit MFA verification code to your email or SMS.
+            </div>
+            <div>
+              <label class="block text-[11px] font-bold uppercase tracking-wider text-slate-400 mb-1">Verification Code</label>
+              <input id="mfa-code" type="text" placeholder="123456" maxlength="8"
+                class="w-full bg-[#182234] border border-transparent focus:border-amber-500 focus:ring-1 focus:ring-amber-500/30 rounded-xl px-4 py-2.5 text-base text-white text-center tracking-widest font-mono transition-all outline-none">
+            </div>
+            <button id="btn-submit-mfa"
+              class="w-full py-2.5 rounded-xl bg-amber-600 hover:bg-amber-500 text-white text-xs font-extrabold uppercase tracking-wider transition">
+              Verify & Complete Login
+            </button>
+          </div>
+
+          <!-- Authenticated State -->
+          <div id="auth-success-container" class="hidden space-y-4 pt-1">
+            <div class="flex items-center space-x-3 p-3.5 bg-emerald-500/10 border-0 rounded-2xl">
+              <div class="w-9 h-9 rounded-full bg-emerald-500/20 flex items-center justify-center text-emerald-400 shrink-0">
+                <i class="fa-solid fa-check text-sm"></i>
+              </div>
+              <div class="overflow-hidden">
+                <p class="text-[10px] uppercase tracking-wider font-bold text-slate-400">Authenticated as</p>
+                <p id="auth-display-name" class="text-xs font-bold text-emerald-300 truncate">Garmin User</p>
+              </div>
+            </div>
+            <button id="btn-logout"
+              class="w-full py-2 rounded-xl bg-[#171e2c] hover:bg-white/[0.08] text-slate-400 hover:text-slate-200 text-xs font-semibold border-0 transition cursor-pointer">
+              Disconnect / Logout
+            </button>
+          </div>
+        </div>
+
+        <!-- Export Settings Card -->
+        <div class="bg-[#111827] border-0 rounded-2xl p-6 shadow-2xl space-y-5">
+          <div class="flex items-center justify-between border-b border-white/[0.06] pb-4">
+            <h2 class="text-xs font-black uppercase tracking-wider flex items-center text-[#00e5ff]">
+              <i class="fa-solid fa-sliders mr-2 text-base text-[#00e5ff]"></i> Export Range & Target
+            </h2>
+            <span class="text-[10px] font-mono font-bold text-slate-500">CONFIG</span>
+          </div>
+
+          <!-- Date Presets -->
+          <div class="space-y-2">
+            <label class="block text-[11px] font-bold uppercase tracking-wider text-slate-400">Quick Presets</label>
+            <div class="grid grid-cols-2 gap-2">
+              <button type="button" class="preset-btn px-2.5 py-1.5 bg-[#121722]/60 hover:bg-white/[0.08] border-0 rounded-xl text-xs font-medium text-slate-300 transition cursor-pointer" data-preset="week">This Week</button>
+              <button type="button" class="preset-btn px-2.5 py-1.5 bg-[#121722]/60 hover:bg-white/[0.08] border-0 rounded-xl text-xs font-medium text-slate-300 transition cursor-pointer" data-preset="30d">Last 30d</button>
+              <button type="button" class="preset-btn px-2.5 py-1.5 bg-[#121722]/60 hover:bg-white/[0.08] border-0 rounded-xl text-xs font-medium text-slate-300 transition cursor-pointer" data-preset="90d">Last 90d</button>
+              <button type="button" class="preset-btn px-2.5 py-1.5 bg-[#121722]/60 hover:bg-white/[0.08] border-0 rounded-xl text-xs font-medium text-slate-300 transition cursor-pointer" data-preset="ytd">Year to Date</button>
+            </div>
+          </div>
+
+          <!-- Date Pickers -->
+          <div class="grid grid-cols-2 gap-3">
+            <div>
+              <label class="block text-[11px] font-bold uppercase tracking-wider text-slate-400 mb-1">Start Date</label>
+              <input id="start-date" type="date"
+                class="w-full bg-[#0b0e14] border border-transparent focus:border-orange-500/80 focus:ring-1 focus:ring-orange-500/30 text-white text-sm rounded-xl px-4 py-2.5 transition-all outline-none [color-scheme:dark] cursor-pointer">
+            </div>
+            <div>
+              <label class="block text-[11px] font-bold uppercase tracking-wider text-slate-400 mb-1">End Date</label>
+              <input id="end-date" type="date"
+                class="w-full bg-[#0b0e14] border border-transparent focus:border-orange-500/80 focus:ring-1 focus:ring-orange-500/30 text-white text-sm rounded-xl px-4 py-2.5 transition-all outline-none [color-scheme:dark] cursor-pointer">
+            </div>
+          </div>
+
+          <!-- Format Selection -->
+          <div class="space-y-2">
+            <div class="flex items-center justify-between">
+              <label class="block text-[11px] font-bold uppercase tracking-wider text-slate-400">Export Format</label>
+              <span class="text-[10px] text-[#00e5ff] font-bold bg-[#00e5ff]/10 px-2 py-0.5 rounded whitespace-nowrap">FIT recommended</span>
+            </div>
+            <div class="grid grid-cols-2 gap-2">
+              <label class="flex items-center space-x-2.5 bg-[#1a2335] border border-transparent p-2.5 rounded-xl cursor-pointer transition shadow-sm">
+                <input type="radio" name="format" value="fit" checked class="accent-[#00e5ff]">
+                <div>
+                  <div class="flex items-center space-x-1.5">
+                    <span class="text-xs font-bold text-white">FIT</span>
+                    <span class="text-[9px] uppercase px-1 py-0.2 bg-[#00e5ff]/20 text-[#00e5ff] font-bold rounded whitespace-nowrap">Best</span>
+                  </div>
+                  <p class="text-[10px] text-slate-400">Full second-by-second HR & splits</p>
+                </div>
+              </label>
+              <label class="flex items-center space-x-2.5 bg-[#121722]/60 border border-transparent p-2.5 rounded-xl cursor-pointer transition">
+                <input type="radio" name="format" value="tcx" class="accent-[#00e5ff]">
+                <div>
+                  <span class="text-xs font-bold text-slate-200">TCX</span>
+                  <p class="text-[10px] text-slate-400">XML laps & trackpoints</p>
+                </div>
+              </label>
+              <label class="flex items-center space-x-2.5 bg-[#121722]/60 border border-transparent p-2.5 rounded-xl cursor-pointer transition">
+                <input type="radio" name="format" value="gpx" class="accent-[#00e5ff]">
+                <div>
+                  <span class="text-xs font-bold text-slate-200">GPX</span>
+                  <p class="text-[10px] text-slate-400">GPS trackpoints only</p>
+                </div>
+              </label>
+              <label class="flex items-center space-x-2.5 bg-[#121722]/60 border border-transparent p-2.5 rounded-xl cursor-pointer transition">
+                <input type="radio" name="format" value="tpx" class="accent-[#00e5ff]">
+                <div>
+                  <span class="text-xs font-bold text-slate-200">TPX</span>
+                  <p class="text-[10px] text-slate-400">XML with extensions</p>
+                </div>
+              </label>
+            </div>
+          </div>
+
+          <!-- Local Destination -->
+          <div class="space-y-1">
+            <div class="flex items-center justify-between">
+              <label class="block text-[11px] font-bold uppercase tracking-wider text-slate-400">Local Output Folder</label>
+              <button type="button" id="btn-clear-exports"
+                class="inline-flex items-center space-x-1 text-[10px] font-bold uppercase tracking-wider text-rose-400 hover:text-rose-300 hover:bg-rose-500/10 px-2 py-0.5 rounded border-0 transition cursor-pointer whitespace-nowrap"
+                title="Strictly deletes files inside this export folder">
+                <i class="fa-regular fa-trash-can text-[10px]"></i>
+                <span>Delete All Export Files</span>
+              </button>
+            </div>
+            <input id="output-dir" type="text" value="./garmin_exports"
+              class="w-full bg-[#182234] border border-transparent focus:border-sky-500 focus:ring-1 focus:ring-sky-500 rounded-xl px-4 py-2.5 text-xs font-mono text-slate-200 transition-all outline-none">
+            <p id="clear-folder-feedback" class="text-[11px] hidden"></p>
+          </div>
+
+          <!-- Remote Sync Accordion -->
+          <div class="border-0 rounded-2xl overflow-hidden bg-[#0d121d]">
+            <button type="button" id="toggle-remote" class="w-full px-3.5 py-2.5 flex items-center justify-between text-xs font-bold text-slate-300 hover:text-white transition cursor-pointer">
+              <span class="flex items-center">
+                <i class="fa-solid fa-cloud-arrow-up mr-2 text-[#f95721]"></i> Remote Webhook Sync (Optional)
+              </span>
+              <i id="remote-chevron" class="fa-solid fa-chevron-down text-[10px] text-slate-500 transition-transform"></i>
+            </button>
+            <div id="remote-fields" class="hidden p-3.5 pt-1 space-y-3 border-t border-white/[0.06] bg-[#0b0e14]">
+              <div>
+                <label class="block text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-1">Target Ingest URL</label>
+                <input id="remote-url" type="url" placeholder="https://letsrunfaster.com/api/activities/sync"
+                  class="w-full bg-[#182234] border border-transparent focus:border-sky-500 focus:ring-1 focus:ring-sky-500 rounded-xl px-4 py-2.5 text-xs text-white placeholder-slate-500 transition-all outline-none">
+              </div>
+              <div>
+                <label class="block text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-1">Bearer API Key</label>
+                <input id="remote-key" type="password" placeholder="api_key_..."
+                  class="w-full bg-[#182234] border border-transparent focus:border-sky-500 focus:ring-1 focus:ring-sky-500 rounded-xl px-4 py-2.5 text-xs text-white placeholder-slate-500 transition-all outline-none">
+              </div>
+            </div>
+          </div>
+
+          <!-- Actions -->
+          <div class="flex space-x-3 pt-1">
+            <button id="btn-fetch-activities"
+              class="flex-1 py-2.5 rounded-xl bg-[#171e2c] hover:bg-white/[0.08] text-slate-200 text-xs font-bold uppercase tracking-wider border-0 transition flex items-center justify-center cursor-pointer">
+              <i class="fa-solid fa-list mr-1.5"></i> Preview List
+            </button>
+            <button id="btn-start-export"
+              class="flex-1 py-2.5 rounded-xl bg-gradient-to-r from-[#f95721] to-[#ea4a14] hover:brightness-110 active:scale-95 text-white text-xs font-black uppercase tracking-wider shadow-lg shadow-orange-500/25 transition flex items-center justify-center space-x-1.5">
+              <i class="fa-solid fa-download"></i>
+              <span>Export Now</span>
+            </button>
+          </div>
+        </div>
+
+      </div>
+
+      <!-- Right Column: Activities Table & Export Progress -->
+      <div class="lg:col-span-2 space-y-6">
+
+        <!-- Progress Bar (Hidden initially) -->
+        <div id="progress-card" class="hidden bg-[#111827] border-0 rounded-2xl p-6 shadow-2xl space-y-3">
+          <div class="flex items-center justify-between">
+            <div class="flex items-center space-x-3">
+              <span id="progress-spinner" class="animate-spin text-[#00e5ff]">
+                <i class="fa-solid fa-circle-notch text-lg"></i>
+              </span>
+              <div>
+                <h3 id="progress-status-title" class="text-xs font-bold uppercase tracking-wider text-white">Exporting activities...</h3>
+                <p id="progress-current-item" class="text-xs font-mono text-slate-400 truncate max-w-md">Preparing download...</p>
+              </div>
+            </div>
+            <span id="progress-count" class="text-xs font-mono font-bold text-[#00e5ff]">0 / 0 (0%)</span>
+          </div>
+
+          <div class="w-full bg-[#0b0e14] rounded-full h-2 overflow-hidden border-0">
+            <div id="progress-bar-fill" class="bg-gradient-to-r from-[#00e5ff] via-[#38bdf8] to-[#f95721] h-2 rounded-full transition-all duration-300" style="width: 0%"></div>
+          </div>
+        </div>
+
+        <!-- Activities List Table Card -->
+        <div class="bg-[#111827] border-0 rounded-2xl p-6 shadow-2xl space-y-4">
+          <div class="flex items-center justify-between border-b border-white/[0.06] pb-4">
+            <div>
+              <h2 class="text-base font-bold text-white tracking-tight font-display">Activities Preview</h2>
+              <p id="activities-subtitle" class="text-xs text-slate-400 mt-0.5">Click "Preview List" to search your Garmin history</p>
+            </div>
+            <span id="activity-count-badge" class="px-3 py-1 bg-[#182234] text-slate-300 text-xs font-mono font-bold rounded-full border-0 whitespace-nowrap">
+              0 items
+            </span>
+          </div>
+
+          <div class="overflow-x-auto">
+            <table class="w-full text-left text-xs border-collapse">
+              <thead>
+                <tr class="border-b border-white/[0.06] text-slate-400 text-[11px] uppercase tracking-wider">
+                  <th class="py-3 px-3 font-semibold">Date / Time</th>
+                  <th class="py-3 px-3 font-semibold">Type</th>
+                  <th class="py-3 px-3 font-semibold">Name</th>
+                  <th class="py-3 px-3 font-semibold text-right cursor-pointer select-none hover:text-white transition" id="th-distance" title="Click to toggle Miles / Kilometers">
+                    <span id="dist-col-label">Distance (mi)</span> <i class="fa-solid fa-arrows-rotate text-[10px] ml-1 text-[#00e5ff]"></i>
+                  </th>
+                  <th class="py-3 px-3 font-semibold text-right">Duration</th>
+                  <th class="py-3 px-3 font-semibold text-center">Status</th>
+                </tr>
+              </thead>
+              <tbody id="activities-tbody" class="divide-y divide-white/[0.04] text-slate-300">
+                <tr>
+                  <td colspan="6" class="py-14 text-center text-slate-500">
+                    <i class="fa-regular fa-folder-open text-3xl mb-2.5 block text-slate-600"></i>
+                    No activities loaded. Pick a date range and click Preview.
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+      </div>
+
+    </div>
+  </div>
+
+  <script>
+    // State
+    let state = {
+      authenticated: false,
+      displayName: null,
+      activities: [],
+      exporting: false,
+      distanceUnit: 'mi', // Default to miles
+    };
+
+    // Toggle distance unit (mi <-> km)
+    document.getElementById('th-distance').addEventListener('click', () => {
+      state.distanceUnit = state.distanceUnit === 'mi' ? 'km' : 'mi';
+      document.getElementById('dist-col-label').textContent = `Distance (${state.distanceUnit})`;
+      if (state.activities && state.activities.length > 0) {
+        renderActivitiesTable(state.activities);
+      }
+    });
+
+    // WebSocket connection for progress
+    const wsProto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    const ws = new WebSocket(`${wsProto}//${window.location.host}/ws`);
+
+    ws.onmessage = (evt) => {
+      try {
+        const msg = JSON.parse(evt.data);
+        if (msg.event === 'export_started') {
+          showProgress(true);
+          updateProgress(0, msg.data.total, 'Started download...');
+        } else if (msg.event === 'export_progress') {
+          const { current, total, filename, success, error } = msg.data;
+          updateProgress(current, total, success ? `Saved: ${filename}` : `Failed: ${error}`);
+          markActivityStatus(msg.data.activityId, success);
+        } else if (msg.event === 'export_completed') {
+          showProgress(true);
+          const { total, succeeded, failed } = msg.data;
+          document.getElementById('progress-status-title').textContent = `Export Completed! (${succeeded}/${total} succeeded)`;
+          document.getElementById('progress-spinner').innerHTML = '<i class="fa-solid fa-check text-emerald-400 text-lg"></i>';
+          state.exporting = false;
+        }
+      } catch (e) {
+        console.error('WS message error:', e);
+      }
+    };
+
+    // Initialize Default Dates (Last 30 days)
+    function setDateRange(daysBack) {
+      const end = new Date();
+      const start = new Date();
+      start.setDate(end.getDate() - daysBack);
+      document.getElementById('end-date').value = end.toISOString().split('T')[0];
+      document.getElementById('start-date').value = start.toISOString().split('T')[0];
+    }
+    setDateRange(30);
+
+    // Preset button handlers
+    document.querySelectorAll('.preset-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const preset = btn.dataset.preset;
+        if (preset === 'week') setCurrentWeek();
+        else if (preset === '30d') setDateRange(30);
+        else if (preset === '90d') setDateRange(90);
+        else if (preset === 'ytd') {
+          const end = new Date();
+          const start = new Date(end.getFullYear(), 0, 1);
+          document.getElementById('end-date').value = end.toISOString().split('T')[0];
+          document.getElementById('start-date').value = start.toISOString().split('T')[0];
+        }
+      });
+    });
+
+    // Current week: Monday (local time) through today
+    function setCurrentWeek() {
+      const now = new Date();
+      const mondayOffset = (now.getDay() + 6) % 7; // Mon=0 ... Sun=6
+      const monday = new Date(now);
+      monday.setDate(now.getDate() - mondayOffset);
+      const fmtLocal = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+      document.getElementById('start-date').value = fmtLocal(monday);
+      document.getElementById('end-date').value = fmtLocal(now);
+    }
+
+    // Remote sync toggle
+    const toggleRemoteBtn = document.getElementById('toggle-remote');
+    const remoteFields = document.getElementById('remote-fields');
+    const remoteChevron = document.getElementById('remote-chevron');
+    toggleRemoteBtn.addEventListener('click', () => {
+      remoteFields.classList.toggle('hidden');
+      remoteChevron.classList.toggle('rotate-180');
+    });
+
+    // Format selection radio styling - flat look, no static borders
+    document.querySelectorAll('input[name="format"]').forEach(radio => {
+      radio.addEventListener('change', () => {
+        document.querySelectorAll('input[name="format"]').forEach(r => {
+          const parent = r.closest('label');
+          if (r.checked) {
+            parent.className = 'flex items-center space-x-2.5 bg-[#1a2335] border border-transparent p-2.5 rounded-xl cursor-pointer transition shadow-sm';
+          } else {
+            parent.className = 'flex items-center space-x-2.5 bg-[#121722]/60 border border-transparent p-2.5 rounded-xl cursor-pointer transition';
+          }
+        });
+      });
+    });
+
+    // Auth status check
+    async function checkAuth() {
+      try {
+        const res = await fetch('/api/auth/status');
+        const data = await res.json();
+        updateAuthUI(data.authenticated, data.displayName);
+      } catch (err) {
+        console.error('Auth status error:', err);
+      }
+    }
+    checkAuth();
+
+    function updateAuthUI(authenticated, displayName) {
+      state.authenticated = authenticated;
+      state.displayName = displayName;
+      const userBadge = document.getElementById('user-badge');
+      const authBadge = document.getElementById('auth-badge-status');
+      const authForm = document.getElementById('auth-form-container');
+      const authSuccess = document.getElementById('auth-success-container');
+      const mfaContainer = document.getElementById('mfa-container');
+
+      if (authenticated) {
+        userBadge.innerHTML = `
+          <span class="inline-flex items-center px-3 py-1 rounded-full text-xs font-bold bg-emerald-500/10 text-emerald-400 border-0 whitespace-nowrap">
+            <span class="w-2 h-2 mr-2 rounded-full bg-emerald-400"></span> Connected: ${displayName || 'User'}
+          </span>`;
+        if (authBadge) {
+          authBadge.textContent = 'CONNECTED';
+          authBadge.className = 'px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider bg-emerald-500/10 text-emerald-400 border-0 whitespace-nowrap';
+        }
+        authForm.classList.add('hidden');
+        mfaContainer.classList.add('hidden');
+        authSuccess.classList.remove('hidden');
+        document.getElementById('auth-display-name').textContent = displayName || 'User';
+      } else {
+        userBadge.innerHTML = `
+          <span class="inline-flex items-center px-3 py-1 rounded-full text-xs font-bold bg-amber-500/10 text-amber-400 border-0 whitespace-nowrap">
+            <span class="w-2 h-2 mr-2 rounded-full bg-amber-400"></span> Not Connected
+          </span>`;
+        if (authBadge) {
+          authBadge.textContent = 'AUTH';
+          authBadge.className = 'px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider bg-slate-800 text-slate-400 border-0 whitespace-nowrap';
+        }
+        authForm.classList.remove('hidden');
+        authSuccess.classList.add('hidden');
+      }
+    }
+
+    // Login Form Submit
+    document.getElementById('login-form').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const email = document.getElementById('login-email').value;
+      const password = document.getElementById('login-password').value;
+      const btn = document.getElementById('btn-login');
+      btn.disabled = true;
+      btn.innerHTML = '<i class="fa-solid fa-circle-notch animate-spin mr-2"></i> Connecting...';
+
+      try {
+        const res = await fetch('/api/auth/login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email, password }),
+        });
+        const data = await res.json();
+        if (data.mfaRequired) {
+          document.getElementById('auth-form-container').classList.add('hidden');
+          document.getElementById('mfa-container').classList.remove('hidden');
+        } else if (data.status === 'AUTHENTICATED') {
+          updateAuthUI(true, data.displayName);
+        } else {
+          alert('Login failed: ' + data.message);
+        }
+      } catch (err) {
+        alert('Login error: ' + err.message);
+      } finally {
+        btn.disabled = false;
+        btn.innerHTML = '<span>Connect Account</span> <i class="fa-solid fa-arrow-right text-[10px]"></i>';
+      }
+    });
+
+    // MFA Submit
+    document.getElementById('btn-submit-mfa').addEventListener('click', async () => {
+      const code = document.getElementById('mfa-code').value.trim();
+      if (!code) return alert('Please enter the MFA verification code.');
+      try {
+        const res = await fetch('/api/auth/mfa', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ code }),
+        });
+        const data = await res.json();
+        if (data.authenticated) {
+          updateAuthUI(true, data.displayName);
+        } else {
+          alert('MFA failed: ' + data.message);
+        }
+      } catch (err) {
+        alert('MFA error: ' + err.message);
+      }
+    });
+
+    // Logout
+    document.getElementById('btn-logout').addEventListener('click', async () => {
+      await fetch('/api/auth/logout', { method: 'POST' });
+      updateAuthUI(false, null);
+    });
+
+    // Preview Activities List
+    document.getElementById('btn-fetch-activities').addEventListener('click', async () => {
+      if (!state.authenticated) return alert('Please connect your Garmin account first.');
+      const startDate = document.getElementById('start-date').value;
+      const endDate = document.getElementById('end-date').value;
+      const btn = document.getElementById('btn-fetch-activities');
+      btn.disabled = true;
+      btn.innerHTML = '<i class="fa-solid fa-circle-notch animate-spin mr-1.5"></i> Loading...';
+
+      try {
+        const res = await fetch('/api/activities/list', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ start_date: startDate, end_date: endDate }),
+        });
+        if (!res.ok) {
+          const err = await res.json();
+          throw new Error(err.detail || 'Failed to fetch activities');
+        }
+        const data = await res.json();
+        state.activities = data.activities || [];
+        renderActivitiesTable(state.activities);
+      } catch (err) {
+        alert('Error fetching activities: ' + err.message);
+      } finally {
+        btn.disabled = false;
+        btn.innerHTML = '<i class="fa-solid fa-list mr-1.5"></i> Preview List';
+      }
+    });
+
+    function renderActivitiesTable(activities) {
+      const tbody = document.getElementById('activities-tbody');
+      document.getElementById('activity-count-badge').textContent = `${activities.length} items`;
+      document.getElementById('activities-subtitle').textContent = `Showing activities from ${document.getElementById('start-date').value} to ${document.getElementById('end-date').value}`;
+
+      if (activities.length === 0) {
+        tbody.innerHTML = `
+          <tr>
+            <td colspan="6" class="py-14 text-center text-slate-500 font-mono text-xs">
+              No activities found in this date range.
+            </td>
+          </tr>`;
+        return;
+      }
+
+      tbody.innerHTML = activities.map(act => {
+        let distDisplay = '-';
+        let milesVal = act.distanceMiles;
+        if ((milesVal === undefined || milesVal === null) && act.distanceKm !== undefined && act.distanceKm !== null) {
+          milesVal = Math.round((act.distanceKm * 0.621371) * 100) / 100;
+        }
+
+        if (state.distanceUnit === 'mi') {
+          distDisplay = milesVal !== null && milesVal !== undefined ? `${milesVal} mi` : '-';
+        } else {
+          let kmVal = act.distanceKm;
+          if ((kmVal === undefined || kmVal === null) && milesVal !== null && milesVal !== undefined) {
+            kmVal = Math.round((milesVal / 0.621371) * 100) / 100;
+          }
+          distDisplay = kmVal !== null && kmVal !== undefined ? `${kmVal} km` : '-';
+        }
+
+        return `
+        <tr id="row-${act.id}" class="hover:bg-white/[0.04] transition">
+          <td class="py-3 px-3 font-mono text-slate-400 text-xs">${act.startTime.replace('T', ' ')}</td>
+          <td class="py-3 px-3">
+            <span class="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold uppercase bg-[#182234] text-slate-300 border-0 whitespace-nowrap">
+              ${act.type}
+            </span>
+          </td>
+          <td class="py-3 px-3 font-bold text-white">${act.name}</td>
+          <td class="py-3 px-3 text-right font-mono text-white font-bold">${distDisplay}</td>
+          <td class="py-3 px-3 text-right font-mono text-emerald-400">${act.durationMin ? act.durationMin + ' min' : '-'}</td>
+          <td class="py-3 px-3 text-center" id="status-${act.id}">
+            <span class="text-slate-500 text-[11px] font-mono">Ready</span>
+          </td>
+        </tr>
+      `}).join('');
+    }
+
+    function markActivityStatus(id, success) {
+      const el = document.getElementById(`status-${id}`);
+      if (el) {
+        el.innerHTML = success
+          ? `<span class="text-emerald-400 font-bold"><i class="fa-solid fa-check mr-1"></i> Exported</span>`
+          : `<span class="text-rose-400 font-bold"><i class="fa-solid fa-xmark mr-1"></i> Failed</span>`;
+      }
+    }
+
+    // Export Start
+    document.getElementById('btn-start-export').addEventListener('click', async () => {
+      if (!state.authenticated) return alert('Please connect your Garmin account first.');
+      const startDate = document.getElementById('start-date').value;
+      const endDate = document.getElementById('end-date').value;
+      const format = document.querySelector('input[name="format"]:checked').value;
+      const outputDir = document.getElementById('output-dir').value;
+      const remoteUrl = document.getElementById('remote-url').value || null;
+      const remoteApiKey = document.getElementById('remote-key').value || null;
+
+      state.exporting = true;
+      showProgress(true);
+      document.getElementById('progress-status-title').textContent = 'Exporting activities...';
+      document.getElementById('progress-spinner').innerHTML = '<i class="fa-solid fa-circle-notch animate-spin text-[#00e5ff] text-lg"></i>';
+
+      try {
+        const res = await fetch('/api/activities/export', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            start_date: startDate,
+            end_date: endDate,
+            format: format,
+            output_dir: outputDir,
+            remote_url: remoteUrl,
+            remote_api_key: remoteApiKey,
+          }),
+        });
+        if (!res.ok) {
+          const err = await res.json();
+          throw new Error(err.detail || 'Export failed');
+        }
+      } catch (err) {
+        alert('Export error: ' + err.message);
+        showProgress(false);
+      }
+    });
+
+    // Clear Export Folder Handler
+    document.getElementById('btn-clear-exports').addEventListener('click', async () => {
+      const outputDir = document.getElementById('output-dir').value.trim();
+      if (!outputDir) {
+        alert('Please specify a valid export folder path.');
+        return;
+      }
+
+      const confirmed = window.confirm(
+        `Are you sure you want to permanently delete all export files in "${outputDir}"?\n\nThis will only delete files inside this folder.`
+      );
+      if (!confirmed) return;
+
+      const btn = document.getElementById('btn-clear-exports');
+      const feedback = document.getElementById('clear-folder-feedback');
+      btn.disabled = true;
+      btn.innerHTML = '<i class="fa-solid fa-circle-notch animate-spin text-[10px]"></i> <span>Deleting...</span>';
+
+      try {
+        const res = await fetch('/api/exports/clear', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ output_dir: outputDir }),
+        });
+        const data = await res.json();
+        if (!res.ok) {
+          throw new Error(data.detail || 'Failed to clear directory');
+        }
+
+        feedback.className = 'text-[11px] text-emerald-400 font-medium';
+        feedback.textContent = `✓ ${data.message}`;
+        feedback.classList.remove('hidden');
+        setTimeout(() => feedback.classList.add('hidden'), 5000);
+      } catch (err) {
+        feedback.className = 'text-[11px] text-rose-400 font-medium';
+        feedback.textContent = `✗ ${err.message}`;
+        feedback.classList.remove('hidden');
+      } finally {
+        btn.disabled = false;
+        btn.innerHTML = '<i class="fa-regular fa-trash-can text-[10px]"></i> <span>Delete All Export Files</span>';
+      }
+    });
+
+    function showProgress(show) {
+      const card = document.getElementById('progress-card');
+      if (show) card.classList.remove('hidden');
+      else card.classList.add('hidden');
+    }
+
+    function updateProgress(current, total, detailText) {
+      const pct = total > 0 ? Math.round((current / total) * 100) : 0;
+      document.getElementById('progress-bar-fill').style.width = `${pct}%`;
+      document.getElementById('progress-count').textContent = `${current} / ${total} (${pct}%)`;
+      document.getElementById('progress-current-item').textContent = detailText;
+    }
+  </script>
+</body>
+</html>

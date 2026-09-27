@@ -1,0 +1,81 @@
+name: Build desktop binaries
+
+on:
+  push:
+    tags:
+      - "v*"
+  pull_request:
+    paths:
+      - "garmin-ingestor.spec"
+      - "garmin_engine/launcher.py"
+      - "garmin_engine/**"
+      - ".github/workflows/build.yml"
+  workflow_dispatch:
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            artifact: GarminIngestor.exe
+          - os: macos-latest
+            artifact: GarminIngestor
+          - os: ubuntu-latest
+            artifact: GarminIngestor
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e .
+          pip install pyinstaller
+
+      - name: Smoke-test (unit tests)
+        run: python -m unittest discover tests
+
+      - name: Build one-file binary
+        run: pyinstaller garmin-ingestor.spec
+
+      - name: Rename macOS binary per arch
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          cd dist
+          ARCH=$(uname -m)
+          if [ "$ARCH" = "arm64" ]; then
+            mv GarminIngestor GarminIngestor-macos-arm64
+          else
+            mv GarminIngestor GarminIngestor-macos-x64
+          fi
+          ls -la
+
+      - name: Upload binary artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: GarminIngestor-${{ runner.os }}
+          path: dist/*
+          if-no-files-found: error
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: binaries
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: binaries/**/*
+          generate_release_notes: true
