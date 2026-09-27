@@ -3,12 +3,12 @@
 
 Build locally:
     pip install pyinstaller
-    pyinstaller garmin-ingestor.spec
+    pyinstaller lrf-ingestor.spec
 
-Output: dist/GarminIngestor (or GarminIngestor.exe on Windows).
+Output: dist/LrfIngestor (or LrfIngestor.exe on Windows).
 Double-click it with no arguments to launch the browser UI.
 Run it with arguments to use the CLI, e.g.:
-    ./dist/GarminIngestor export --start 2025-01-01 --end 2025-06-01
+    ./dist/LrfIngestor export --start 2025-01-01 --end 2025-06-01
 """
 
 block_cipher = None
@@ -70,7 +70,7 @@ exe = EXE(
     a.zipfiles,
     a.datas,
     [],
-    name="GarminIngestor",
+    name="LrfIngestor",
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,

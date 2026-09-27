@@ -225,9 +225,16 @@ def clear_export_folder(payload: ClearExportFolderRequest):
     if not target_dir.is_dir():
         raise HTTPException(status_code=400, detail=f"Path '{raw_dir}' is not a directory.")
 
-    # Restrict against dangerous root/system directories
+    # Restrict against dangerous root/system directories.
+    # NOTE: Path("/") is NOT the filesystem root on Windows (it resolves to
+    # the current drive root, e.g. "C:\\"), so compare against the resolved
+    # path's own anchor to catch "/" on POSIX and "C:\\" etc. on Windows.
     repo_root = Path(__file__).resolve().parent.parent
-    if target_dir in (Path("/"), Path.home(), repo_root):
+    if (
+        str(target_dir) == target_dir.anchor
+        or target_dir == Path.home()
+        or target_dir == repo_root
+    ):
         raise HTTPException(status_code=403, detail="Deleting root, home, or project root directory is forbidden.")
 
     # Prevent deleting inside source code directories
