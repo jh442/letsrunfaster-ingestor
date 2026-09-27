@@ -1,6 +1,9 @@
 """Test web server endpoints."""
 
+import tempfile
 import unittest
+from pathlib import Path
+
 from fastapi.testclient import TestClient
 from garmin_engine.web_server import app
 
@@ -27,9 +30,6 @@ class TestWebServer(unittest.TestCase):
         self.assertNotIn("fa-person-running", resp.text)
 
     def test_clear_exports_endpoint_success(self):
-        import tempfile
-        from pathlib import Path
-
         with tempfile.TemporaryDirectory() as tmpdir:
             test_dir = Path(tmpdir) / "exports"
             test_dir.mkdir()
@@ -56,6 +56,11 @@ class TestWebServer(unittest.TestCase):
 
         # Disallow root or home or system dirs
         resp = client.post("/api/exports/clear", json={"output_dir": "/"})
+        self.assertEqual(resp.status_code, 403)
+
+        # Filesystem anchor root explicitly ("/" on POSIX, e.g. "C:\\" on Windows)
+        anchor = Path(tempfile.gettempdir()).anchor
+        resp = client.post("/api/exports/clear", json={"output_dir": anchor})
         self.assertEqual(resp.status_code, 403)
 
 
