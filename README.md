@@ -89,29 +89,41 @@ Export as `.fit` to a local folder:
 garmin-ingestor export --start 2025-01-01 --end 2025-06-01 --format fit --output ./my_exports
 ```
 
-Export as `.gpx` and sync directly to your external website:
+Export as `.gpx` and push directly to LetsRunFaster (needs the API key from
+your profile page → API Key):
 ```bash
 garmin-ingestor export \
   --start 2025-01-01 \
   --end 2025-06-01 \
-  --format gpx \
-  --remote-url https://my-site.com/api/activities/sync \
-  --remote-key "your-api-key"
+  --format fit \
+  --remote-url https://letsrunfaster.com/api/activities/import \
+  --remote-key "lrf_..."
 ```
 
 ## Remote Ingestion API Specification
 
 When `--remote-url` is specified, `garmin-ingestor` will send a `multipart/form-data` `POST` request for each activity:
 
-- **Headers**: `Authorization: Bearer <remote-key>`
+- **Headers**: `Authorization: Bearer <remote-key>` (`lrf_...` from your profile page)
 - **Form fields**:
   - `activity_id`: Garmin numeric activity ID (string)
   - `activity_name`: Name of the activity
   - `activity_type`: E.g., `running`, `cycling`, `swimming`
   - `start_time`: Local start timestamp (e.g. `2025-03-01 07:15:00`)
-  - `format`: `fit` or `gpx`
+  - `format`: `fit`, `gpx` or `tcx`
+  - Parsed FIT payload (FIT exports only, mirrors the site's ParsedGpxResult):
+    `distance_miles`, `avg_pace`, `avg_hr`, `max_hr`, `avg_cadence`,
+    `elev_gain_ft`, `finish_time`, `device`, `telemetry_json`
+    (downsampled to fit the site's 500KB cap)
 - **File**:
-  - `file`: The binary payload of the activity file (`.fit` or `.gpx`)
+  - `file`: The binary payload of the activity file (`.fit`, `.gpx` or `.tcx`)
+- **Response** (always HTTP 200 on valid key):
+  - `{ ok:true, matched:true, block_id, day_id, appended_to }` — appended to the
+    training-block day (never replaces a *different* activity; fills primary, else second, else extra)
+  - `{ ok:true, matched:true, replaced:true, slot }` — same activity already on the
+    day (distance ±0.05mi, HR ±2, duration ±30s): refreshed in place, no duplicate row
+  - `{ ok:true, matched:false, code:"no_block_found", activity_date }` — no block
+    covers that date; export again after creating one
 
 ## Running Tests
 ```bash

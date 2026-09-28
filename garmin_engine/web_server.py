@@ -188,6 +188,8 @@ async def start_export(payload: ExportRequest):
                     "sizeBytes": res.size_bytes,
                     "savedPath": res.saved_path,
                     "remoteSynced": res.remote_synced,
+                    "remoteMatched": res.remote_matched,
+                    "remoteDetail": res.remote_detail,
                     "error": res.error_message,
                 },
             )
