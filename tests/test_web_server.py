@@ -126,8 +126,8 @@ class TestRemoteSettings(unittest.TestCase):
 
     def test_resolve_latest_url(self):
         self.assertEqual(
-            app_settings.resolve_latest_url("https://letsrunfaster.com/api/activities/import"),
-            "https://letsrunfaster.com/api/activities/latest",
+            app_settings.resolve_latest_url("https://www.letsrunfaster.com/api/activities/import"),
+            "https://www.letsrunfaster.com/api/activities/latest",
         )
         self.assertEqual(
             app_settings.resolve_latest_url("https://example.com/api/activities/import/"),
@@ -138,6 +138,31 @@ class TestRemoteSettings(unittest.TestCase):
             app_settings.resolve_latest_url("https://example.com/custom"),
             "https://example.com/custom/activities/latest",
         )
+
+    def test_apex_url_canonicalized_to_www(self):
+        # The apex 301-redirects to www and HTTP clients drop Authorization
+        # across that hop (surfaces as a site 401), so apex input must be
+        # rewritten everywhere: resolver, saver, and reader.
+        self.assertEqual(
+            app_settings.canonicalize_url("https://letsrunfaster.com/api/activities/import"),
+            "https://www.letsrunfaster.com/api/activities/import",
+        )
+        self.assertEqual(
+            app_settings.resolve_latest_url("https://letsrunfaster.com/api/activities/import"),
+            "https://www.letsrunfaster.com/api/activities/latest",
+        )
+        # www, lookalike hosts, and custom/dev URLs pass through untouched.
+        self.assertEqual(
+            app_settings.canonicalize_url("https://www.letsrunfaster.com/api/activities/import"),
+            "https://www.letsrunfaster.com/api/activities/import",
+        )
+        self.assertEqual(
+            app_settings.canonicalize_url("http://localhost:8080/api/activities/import"),
+            "http://localhost:8080/api/activities/import",
+        )
+        client.post("/api/settings/remote", json={"remote_url": "https://letsrunfaster.com/api/activities/import"})
+        url, _ = app_settings.get_remote_settings()
+        self.assertEqual(url, "https://www.letsrunfaster.com/api/activities/import")
 
     def test_sync_latest_requires_key(self):
         resp = client.post("/api/sync/latest", json={})

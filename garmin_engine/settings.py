@@ -15,7 +15,26 @@ import os
 from pathlib import Path
 from typing import Any, Dict, Optional, Tuple
 
-DEFAULT_REMOTE_URL = "https://letsrunfaster.com/api/activities/import"
+DEFAULT_REMOTE_URL = "https://www.letsrunfaster.com/api/activities/import"
+
+
+def canonicalize_url(url: str) -> str:
+    """Rewrite the bare-apex site host to www.
+
+    The apex (https://letsrunfaster.com) 301-redirects to www, and HTTP
+    clients drop the Authorization header when following a cross-host
+    redirect — so pushing to the apex always surfaces as a 401 on the site.
+    Canonicalizing here (one place, covering UI/CLI/RPC) self-heals configs
+    saved before this fix. Local/dev hosts pass through untouched.
+    """
+    cleaned = (url or "").strip()
+    lowered = cleaned.lower()
+    for scheme in ("https://", "http://"):
+        if lowered.startswith(scheme + "letsrunfaster.com"):
+            rest = cleaned[len(scheme + "letsrunfaster.com"):]
+            if rest == "" or rest.startswith("/"):
+                return "https://www.letsrunfaster.com" + rest
+    return cleaned
 
 
 def config_path() -> Path:
@@ -49,7 +68,7 @@ def save_config(
     """
     cfg = load_config()
     if remote_url is not None:
-        cleaned = remote_url.strip()
+        cleaned = canonicalize_url(remote_url)
         if cleaned:
             cfg["remote_url"] = cleaned
         elif "remote_url" in cfg:
@@ -86,14 +105,14 @@ def public_config(cfg: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
 def get_remote_settings() -> Tuple[Optional[str], Optional[str]]:
     """Saved (url, key) pair; key is None when never saved."""
     cfg = load_config()
-    url = (cfg.get("remote_url") or DEFAULT_REMOTE_URL).strip() or DEFAULT_REMOTE_URL
+    url = canonicalize_url(cfg.get("remote_url") or DEFAULT_REMOTE_URL) or DEFAULT_REMOTE_URL
     key = (cfg.get("remote_api_key") or "").strip() or None
     return url, key
 
 
 def resolve_latest_url(remote_url: Optional[str] = None) -> str:
     """Derive the sibling ``/activities/latest`` URL from an import URL."""
-    base = (remote_url or "").strip() or load_config().get("remote_url") or DEFAULT_REMOTE_URL
+    base = canonicalize_url((remote_url or "").strip() or load_config().get("remote_url") or DEFAULT_REMOTE_URL)
     base = base.strip()
     if base.rstrip("/").endswith("/activities/import"):
         return base.rstrip("/")[: -len("/activities/import")] + "/activities/latest"
