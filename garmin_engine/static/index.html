@@ -242,12 +242,7 @@
                 <input id="push-enabled" type="checkbox" checked class="accent-[#f95721] w-4 h-4">
                 <span class="text-xs font-bold text-white">Also push to LetsRunFaster</span>
               </label>
-              <p class="text-[10px] text-slate-500">Appends each activity to the matching training-block day (never replaces). Needs the API key from your profile page.</p>
-              <div>
-                <label class="block text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-1">Target Ingest URL</label>
-                <input id="remote-url" type="url" value="https://letsrunfaster.com/api/activities/import" placeholder="https://letsrunfaster.com/api/activities/import"
-                  class="w-full bg-[#182234] border border-transparent focus:border-sky-500 focus:ring-1 focus:ring-sky-500 rounded-xl px-4 py-2.5 text-xs text-white placeholder-slate-500 transition-all outline-none">
-              </div>
+              <p class="text-[10px] text-slate-500">Appends each activity to the matching training-block day (never replaces). Pushes to LetsRunFaster directly — needs the API key from your profile page.</p>
               <div>
                 <label class="block text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-1">Bearer API Key</label>
                 <div class="flex space-x-2">
@@ -262,7 +257,7 @@
                 <div class="flex items-center space-x-2 mt-2">
                   <button type="button" id="btn-save-remote"
                     class="px-3 py-1.5 rounded-xl bg-[#00e5ff]/10 hover:bg-[#00e5ff]/20 text-[#00e5ff] text-[11px] font-bold uppercase tracking-wider border-0 transition cursor-pointer">
-                    <i class="fa-solid fa-floppy-disk mr-1"></i> Save URL + Key
+                    <i class="fa-solid fa-floppy-disk mr-1"></i> Save Key
                   </button>
                   <span id="remote-save-status" class="text-[11px] text-slate-500"></span>
                 </div>
@@ -295,10 +290,11 @@
       </div>
 
       <!-- Right Column: Activities Table & Export Progress -->
-      <div class="lg:col-span-2 space-y-6">
+      <div class="lg:col-span-2">
 
-        <!-- Progress Bar (Hidden initially) -->
-        <div id="progress-card" class="hidden bg-[#111827] border-0 rounded-2xl p-6 shadow-2xl space-y-3">
+        <!-- Progress Bar (Hidden initially; carries its own bottom margin so
+             the preview card below stays top-aligned while it is hidden) -->
+        <div id="progress-card" class="hidden bg-[#111827] border-0 rounded-2xl p-6 shadow-2xl space-y-3 mb-6">
           <div class="flex items-center justify-between">
             <div class="flex items-center space-x-3">
               <span id="progress-spinner" class="animate-spin text-[#00e5ff]">
@@ -451,9 +447,8 @@
       remoteChevron.classList.toggle('rotate-180');
     });
 
-    // Persist LetsRunFaster push settings server-side (shared with CLI/RPC),
-    // with browser localStorage as an offline fallback.
-    const remoteUrlEl = document.getElementById('remote-url');
+    // The ingest URL is hardcoded server-side (DEFAULT_REMOTE_URL); only the
+    // API key is saved here, server-side (shared with CLI/RPC).
     const remoteKeyEl = document.getElementById('remote-key');
     const pushEnabledEl = document.getElementById('push-enabled');
     const remoteSaveStatus = document.getElementById('remote-save-status');
@@ -466,36 +461,22 @@
       try {
         const res = await fetch('/api/settings/remote');
         if (res.ok) server = await res.json();
-      } catch (e) { /* server unreachable — fall back to localStorage */ }
+      } catch (e) { /* server unreachable — defaults apply */ }
       try {
-        if (server) {
-          if (server.remote_url) {
-            remoteUrlEl.value = server.remote_url;
-            localStorage.setItem('lrf_remote_url', server.remote_url);
-          }
-          if (server.has_key) {
-            setSaveStatus(`✓ Key saved on this computer (${server.key_prefix}…)`, true);
-            remoteFields.classList.remove('hidden');
-          }
-        } else {
-          const savedUrl = localStorage.getItem('lrf_remote_url');
-          if (savedUrl) remoteUrlEl.value = savedUrl;
-          const savedKey = localStorage.getItem('lrf_remote_key');
-          if (savedKey) remoteKeyEl.value = savedKey;
-          if (savedUrl || savedKey) remoteFields.classList.remove('hidden');
+        if (server && server.has_key) {
+          setSaveStatus(`✓ Key saved on this computer (${server.key_prefix}…)`, true);
+          remoteFields.classList.remove('hidden');
         }
+        try { localStorage.removeItem('lrf_remote_url'); } catch (e) { /* ignore */ }
         const savedPush = localStorage.getItem('lrf_push_enabled');
         if (savedPush !== null) pushEnabledEl.checked = savedPush === '1';
       } catch (e) { /* private mode — skip persistence */ }
     }
     loadRemoteSettings();
-    [remoteUrlEl, pushEnabledEl].forEach((el) => {
-      el.addEventListener('change', () => {
-        try {
-          localStorage.setItem('lrf_remote_url', remoteUrlEl.value);
-          localStorage.setItem('lrf_push_enabled', pushEnabledEl.checked ? '1' : '0');
-        } catch (e) { /* ignore */ }
-      });
+    pushEnabledEl.addEventListener('change', () => {
+      try {
+        localStorage.setItem('lrf_push_enabled', pushEnabledEl.checked ? '1' : '0');
+      } catch (e) { /* ignore */ }
     });
     remoteKeyEl.addEventListener('change', () => {
       // Keystrokes stay local until the user clicks Save (which stores the
@@ -516,14 +497,11 @@
         const res = await fetch('/api/settings/remote', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ remote_url: remoteUrlEl.value, remote_api_key: remoteKeyEl.value || undefined }),
+          body: JSON.stringify({ remote_api_key: remoteKeyEl.value || undefined }),
         });
         const data = await res.json();
         if (!res.ok) throw new Error(data.detail || 'Save failed');
-        try {
-          localStorage.setItem('lrf_remote_url', remoteUrlEl.value);
-          localStorage.removeItem('lrf_remote_key');
-        } catch (e) { /* ignore */ }
+        try { localStorage.removeItem('lrf_remote_key'); } catch (e) { /* ignore */ }
         remoteKeyEl.value = '';
         remoteKeyEl.placeholder = data.has_key ? `Saved (${data.key_prefix}…)` : 'lrf_...';
         setSaveStatus(data.has_key ? `✓ Saved — key on file (${data.key_prefix}…)` : '✓ URL saved (no key).', true);
@@ -548,7 +526,7 @@
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            remote_url: pushEnabledEl.checked ? (remoteUrlEl.value || null) : '',
+            remote_url: null,
             remote_api_key: null,
           }),
         });
@@ -803,8 +781,8 @@
       const pushEnabled = document.getElementById('push-enabled').checked;
       // "" disables pushing server-side; null falls back to the saved
       // settings (server config file). An empty key field + push on means
-      // "use the saved key".
-      const remoteUrl = pushEnabled ? (document.getElementById('remote-url').value || null) : '';
+      // "use the saved key". The ingest URL is hardcoded server-side.
+      const remoteUrl = pushEnabled ? null : '';
       const remoteApiKey = pushEnabled ? (document.getElementById('remote-key').value || null) : '';
 
       state.exporting = true;
