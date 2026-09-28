@@ -13,6 +13,7 @@ from pydantic import BaseModel
 
 from .auth import GarminAuthManager, AuthStatus
 from .exporter import GarminExporter, ExportFormat
+from . import settings as app_settings
 
 app = FastAPI(title="LetsRunFaster Ingestor")
 
@@ -141,6 +142,22 @@ def list_activities(payload: ListActivitiesRequest):
 @app.post("/api/activities/export")
 async def start_export(payload: ExportRequest):
     try:
+        saved_url, saved_key = app_settings.get_remote_settings()
+        # Push-target contract: omitted (None) falls back to saved settings,
+        # explicit "" disables pushing (the UI sends "" when its push
+        # checkbox is off, so "locally only" keeps working).
+        if payload.remote_url is None:
+            remote_url: Optional[str] = saved_url
+        elif payload.remote_url.strip() == "":
+            remote_url = None
+        else:
+            remote_url = payload.remote_url.strip()
+        if payload.remote_api_key is None:
+            remote_api_key: Optional[str] = saved_key
+        elif payload.remote_api_key.strip() == "":
+            remote_api_key = None
+        else:
+            remote_api_key = payload.remote_api_key.strip()
         client = active_client or auth_mgr.get_client()
         client.login(tokenstore=auth_mgr.token_store)
         exporter = GarminExporter(client)
@@ -170,8 +187,8 @@ async def start_export(payload: ExportRequest):
                 activity=act,
                 export_format=export_fmt,
                 output_dir=dest_dir,
-                remote_url=payload.remote_url,
-                remote_api_key=payload.remote_api_key,
+                remote_url=remote_url,
+                remote_api_key=remote_api_key,
             )
 
         for idx, act in enumerate(activities, start=1):
@@ -210,6 +227,77 @@ async def start_export(payload: ExportRequest):
 
 class ClearExportFolderRequest(BaseModel):
     output_dir: str = "./garmin_exports"
+
+
+class RemoteSettingsRequest(BaseModel):
+    remote_url: Optional[str] = None
+    remote_api_key: Optional[str] = None
+    clear_key: bool = False
+
+
+class SyncLatestRequest(BaseModel):
+    remote_url: Optional[str] = None
+    remote_api_key: Optional[str] = None
+
+
+@app.get("/api/settings/remote")
+def get_remote_settings():
+    """Saved LetsRunFaster push target (key prefix only, never the secret)."""
+    return app_settings.public_config()
+
+
+@app.post("/api/settings/remote")
+def save_remote_settings(payload: RemoteSettingsRequest):
+    """Persist the ingest URL + API key to ~/.garmin-ingestor/config.json."""
+    if payload.remote_url is not None and payload.remote_url.strip() == "":
+        raise HTTPException(status_code=400, detail="Remote URL cannot be empty.")
+    if payload.remote_api_key is not None and payload.clear_key:
+        raise HTTPException(status_code=400, detail="Pass either remote_api_key or clear_key, not both.")
+    saved = app_settings.save_config(
+        remote_url=payload.remote_url,
+        remote_api_key=payload.remote_api_key,
+        clear_key=payload.clear_key,
+    )
+    return {"success": True, **saved}
+
+
+@app.post("/api/sync/latest")
+def fetch_sync_latest(payload: SyncLatestRequest):
+    """Ask the webapp for the owner's latest block activity day.
+
+    Server-side proxy (avoids browser CORS): resolves the saved push
+    settings when the request omits them, derives the sibling
+    /activities/latest URL from the import URL, and forwards the call with
+    the saved Bearer key. The UI defaults its start date to
+    ``suggested_start`` (latest actual day + 1).
+    """
+    import requests as http_requests
+
+    saved_url, saved_key = app_settings.get_remote_settings()
+    remote_url = (payload.remote_url or "").strip() or saved_url
+    api_key = (payload.remote_api_key or "").strip() or saved_key
+    if not api_key:
+        raise HTTPException(status_code=400, detail="No API key saved. Save your LetsRunFaster API key first.")
+    latest_url = app_settings.resolve_latest_url(remote_url)
+    try:
+        resp = http_requests.get(
+            latest_url,
+            headers={"Authorization": f"Bearer {api_key}"},
+            timeout=15,
+        )
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"Could not reach LetsRunFaster: {e}")
+    if resp.status_code == 401:
+        raise HTTPException(status_code=401, detail="LetsRunFaster rejected the API key.")
+    if resp.status_code != 200:
+        raise HTTPException(status_code=502, detail=f"LetsRunFaster returned HTTP {resp.status_code}.")
+    try:
+        body = resp.json()
+    except Exception:
+        raise HTTPException(status_code=502, detail="LetsRunFaster returned a non-JSON response.")
+    if not isinstance(body, dict) or not body.get("ok"):
+        raise HTTPException(status_code=502, detail="LetsRunFaster returned an unexpected response.")
+    return body
 
 
 @app.post("/api/exports/clear")

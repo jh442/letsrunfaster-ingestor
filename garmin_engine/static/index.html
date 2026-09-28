@@ -242,17 +242,33 @@
                 <input id="push-enabled" type="checkbox" checked class="accent-[#f95721] w-4 h-4">
                 <span class="text-xs font-bold text-white">Also push to LetsRunFaster</span>
               </label>
-              <p class="text-[10px] text-slate-500">Appends each activity to the matching training-block day (never replaces). Needs the API key from your profile page.</p>
-              <div>
-                <label class="block text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-1">Target Ingest URL</label>
-                <input id="remote-url" type="url" value="https://letsrunfaster.com/api/activities/import" placeholder="https://letsrunfaster.com/api/activities/import"
-                  class="w-full bg-[#182234] border border-transparent focus:border-sky-500 focus:ring-1 focus:ring-sky-500 rounded-xl px-4 py-2.5 text-xs text-white placeholder-slate-500 transition-all outline-none">
-              </div>
+              <p class="text-[10px] text-slate-500">Appends each activity to the matching training-block day (never replaces). Pushes to LetsRunFaster directly — needs the API key from your profile page.</p>
               <div>
                 <label class="block text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-1">Bearer API Key</label>
-                <input id="remote-key" type="password" placeholder="lrf_..."
-                  class="w-full bg-[#182234] border border-transparent focus:border-sky-500 focus:ring-1 focus:ring-sky-500 rounded-xl px-4 py-2.5 text-xs text-white placeholder-slate-500 transition-all outline-none">
-                <p class="text-[10px] text-slate-500 mt-1">From your profile page → API Key. Stored only in this browser.</p>
+                <div class="flex space-x-2">
+                  <input id="remote-key" type="password" placeholder="lrf_..."
+                    class="flex-1 min-w-0 bg-[#182234] border border-transparent focus:border-sky-500 focus:ring-1 focus:ring-sky-500 rounded-xl px-4 py-2.5 text-xs text-white placeholder-slate-500 transition-all outline-none">
+                  <button type="button" id="btn-toggle-key" title="Show / hide key"
+                    class="px-3 rounded-xl bg-[#182234] hover:bg-white/[0.08] text-slate-400 hover:text-slate-200 border-0 transition cursor-pointer shrink-0">
+                    <i class="fa-regular fa-eye text-xs"></i>
+                  </button>
+                </div>
+                <p class="text-[10px] text-slate-500 mt-1">From your profile page → API Key.</p>
+                <div class="flex items-center space-x-2 mt-2">
+                  <button type="button" id="btn-save-remote"
+                    class="px-3 py-1.5 rounded-xl bg-[#00e5ff]/10 hover:bg-[#00e5ff]/20 text-[#00e5ff] text-[11px] font-bold uppercase tracking-wider border-0 transition cursor-pointer">
+                    <i class="fa-solid fa-floppy-disk mr-1"></i> Save Key
+                  </button>
+                  <span id="remote-save-status" class="text-[11px] text-slate-500"></span>
+                </div>
+              </div>
+              <div class="pt-1">
+                <button type="button" id="btn-sync-new"
+                  class="w-full py-2.5 rounded-xl bg-gradient-to-r from-[#00e5ff] to-[#0891b2] hover:brightness-110 active:scale-95 text-[#0b0e14] text-xs font-black uppercase tracking-wider shadow-lg shadow-cyan-500/20 transition flex items-center justify-center space-x-1.5">
+                  <i class="fa-solid fa-wand-magic-sparkles"></i>
+                  <span>Sync new since last import</span>
+                </button>
+                <p id="sync-new-status" class="text-[11px] text-slate-500 mt-1.5"></p>
               </div>
             </div>
           </div>
@@ -274,10 +290,11 @@
       </div>
 
       <!-- Right Column: Activities Table & Export Progress -->
-      <div class="lg:col-span-2 space-y-6">
+      <div class="lg:col-span-2">
 
-        <!-- Progress Bar (Hidden initially) -->
-        <div id="progress-card" class="hidden bg-[#111827] border-0 rounded-2xl p-6 shadow-2xl space-y-3">
+        <!-- Progress Bar (Hidden initially; carries its own bottom margin so
+             the preview card below stays top-aligned while it is hidden) -->
+        <div id="progress-card" class="hidden bg-[#111827] border-0 rounded-2xl p-6 shadow-2xl space-y-3 mb-6">
           <div class="flex items-center justify-between">
             <div class="flex items-center space-x-3">
               <span id="progress-spinner" class="animate-spin text-[#00e5ff]">
@@ -430,27 +447,106 @@
       remoteChevron.classList.toggle('rotate-180');
     });
 
-    // Persist LetsRunFaster push settings locally (URL + key + checkbox).
-    const remoteUrlEl = document.getElementById('remote-url');
+    // The ingest URL is hardcoded server-side (DEFAULT_REMOTE_URL); only the
+    // API key is saved here, server-side (shared with CLI/RPC).
     const remoteKeyEl = document.getElementById('remote-key');
     const pushEnabledEl = document.getElementById('push-enabled');
-    try {
-      const savedUrl = localStorage.getItem('lrf_remote_url');
-      if (savedUrl) remoteUrlEl.value = savedUrl;
-      const savedKey = localStorage.getItem('lrf_remote_key');
-      if (savedKey) remoteKeyEl.value = savedKey;
-      const savedPush = localStorage.getItem('lrf_push_enabled');
-      if (savedPush !== null) pushEnabledEl.checked = savedPush === '1';
-      if (savedUrl || savedKey) remoteFields.classList.remove('hidden');
-    } catch (e) { /* private mode — skip persistence */ }
-    [remoteUrlEl, remoteKeyEl, pushEnabledEl].forEach((el) => {
-      el.addEventListener('change', () => {
-        try {
-          localStorage.setItem('lrf_remote_url', remoteUrlEl.value);
-          localStorage.setItem('lrf_remote_key', remoteKeyEl.value);
-          localStorage.setItem('lrf_push_enabled', pushEnabledEl.checked ? '1' : '0');
-        } catch (e) { /* ignore */ }
-      });
+    const remoteSaveStatus = document.getElementById('remote-save-status');
+    function setSaveStatus(msg, ok) {
+      remoteSaveStatus.textContent = msg;
+      remoteSaveStatus.className = 'text-[11px] ' + (ok === true ? 'text-emerald-400 font-medium' : ok === false ? 'text-rose-400 font-medium' : 'text-slate-500');
+    }
+    async function loadRemoteSettings() {
+      let server = null;
+      try {
+        const res = await fetch('/api/settings/remote');
+        if (res.ok) server = await res.json();
+      } catch (e) { /* server unreachable — defaults apply */ }
+      try {
+        if (server && server.has_key) {
+          setSaveStatus(`✓ Key saved on this computer (${server.key_prefix}…)`, true);
+          remoteFields.classList.remove('hidden');
+        }
+        try { localStorage.removeItem('lrf_remote_url'); } catch (e) { /* ignore */ }
+        const savedPush = localStorage.getItem('lrf_push_enabled');
+        if (savedPush !== null) pushEnabledEl.checked = savedPush === '1';
+      } catch (e) { /* private mode — skip persistence */ }
+    }
+    loadRemoteSettings();
+    pushEnabledEl.addEventListener('change', () => {
+      try {
+        localStorage.setItem('lrf_push_enabled', pushEnabledEl.checked ? '1' : '0');
+      } catch (e) { /* ignore */ }
+    });
+    remoteKeyEl.addEventListener('change', () => {
+      // Keystrokes stay local until the user clicks Save (which stores the
+      // key server-side in ~/.garmin-ingestor/config.json, never the page).
+      try { localStorage.setItem('lrf_push_enabled', pushEnabledEl.checked ? '1' : '0'); } catch (e) { /* ignore */ }
+      if (remoteKeyEl.value) setSaveStatus('Unsaved key — click Save URL + Key.', null);
+    });
+    document.getElementById('btn-toggle-key').addEventListener('click', () => {
+      const show = remoteKeyEl.type === 'password';
+      remoteKeyEl.type = show ? 'text' : 'password';
+      document.querySelector('#btn-toggle-key i').className = show ? 'fa-regular fa-eye-slash text-xs' : 'fa-regular fa-eye text-xs';
+    });
+    document.getElementById('btn-save-remote').addEventListener('click', async () => {
+      const btn = document.getElementById('btn-save-remote');
+      btn.disabled = true;
+      setSaveStatus('Saving…', null);
+      try {
+        const res = await fetch('/api/settings/remote', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ remote_api_key: remoteKeyEl.value || undefined }),
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.detail || 'Save failed');
+        try { localStorage.removeItem('lrf_remote_key'); } catch (e) { /* ignore */ }
+        remoteKeyEl.value = '';
+        remoteKeyEl.placeholder = data.has_key ? `Saved (${data.key_prefix}…)` : 'lrf_...';
+        setSaveStatus(data.has_key ? `✓ Saved — key on file (${data.key_prefix}…)` : '✓ URL saved (no key).', true);
+      } catch (err) {
+        setSaveStatus('✗ ' + err.message, false);
+      } finally {
+        btn.disabled = false;
+      }
+    });
+
+    // Sync-new: ask the webapp (via local proxy) for the latest block day,
+    // default the range to suggested_start..today, and preview the activities.
+    document.getElementById('btn-sync-new').addEventListener('click', async () => {
+      const statusEl = document.getElementById('sync-new-status');
+      const btn = document.getElementById('btn-sync-new');
+      if (!state.authenticated) { statusEl.textContent = 'Connect your Garmin account first.'; return; }
+      btn.disabled = true;
+      statusEl.textContent = 'Asking LetsRunFaster for your latest imported day…';
+      statusEl.className = 'text-[11px] text-slate-500 mt-1.5';
+      try {
+        const res = await fetch('/api/sync/latest', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            remote_url: null,
+            remote_api_key: null,
+          }),
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.detail || 'Sync lookup failed');
+        if (!data.suggested_start) throw new Error('No training block found on the site yet.');
+        const today = new Date().toISOString().split('T')[0];
+        document.getElementById('start-date').value = data.suggested_start;
+        document.getElementById('end-date').value = today;
+        statusEl.textContent = data.latest_date
+          ? `✓ Latest block day ${data.latest_date} — showing Garmin activities from ${data.suggested_start} to ${today}. Press Export Now to import.`
+          : `✓ No logged days yet — showing Garmin activities from block start ${data.suggested_start}. Press Export Now to import.`;
+        statusEl.className = 'text-[11px] text-emerald-400 font-medium mt-1.5';
+        document.getElementById('btn-fetch-activities').click();
+      } catch (err) {
+        statusEl.textContent = '✗ ' + err.message;
+        statusEl.className = 'text-[11px] text-rose-400 font-medium mt-1.5';
+      } finally {
+        btn.disabled = false;
+      }
     });
 
     // Format selection radio styling - flat look, no static borders
@@ -683,11 +779,11 @@
       const format = document.querySelector('input[name="format"]:checked').value;
       const outputDir = document.getElementById('output-dir').value;
       const pushEnabled = document.getElementById('push-enabled').checked;
-      const remoteUrl = pushEnabled ? (document.getElementById('remote-url').value || null) : null;
-      const remoteApiKey = pushEnabled ? (document.getElementById('remote-key').value || null) : null;
-      if (pushEnabled && !remoteApiKey) {
-        if (!window.confirm('Push is checked but no API key is set. Export locally only?')) return;
-      }
+      // "" disables pushing server-side; null falls back to the saved
+      // settings (server config file). An empty key field + push on means
+      // "use the saved key". The ingest URL is hardcoded server-side.
+      const remoteUrl = pushEnabled ? null : '';
+      const remoteApiKey = pushEnabled ? (document.getElementById('remote-key').value || null) : '';
 
       state.exporting = true;
       showProgress(true);
