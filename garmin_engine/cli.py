@@ -10,6 +10,7 @@ from rich.table import Table
 
 from .auth import GarminAuthManager, AuthStatus
 from .exporter import GarminExporter, ExportFormat
+from . import settings as app_settings
 
 app = typer.Typer(
     help="Garmin Ingestor: Bulk export activities (FIT/GPX) to local disk or remote API."
@@ -120,6 +121,32 @@ def list_activities(
 
 
 @app.command()
+def configure(
+    remote_url: Optional[str] = typer.Option(None, "--remote-url", help="LetsRunFaster ingest URL to save"),
+    remote_key: Optional[str] = typer.Option(None, "--remote-key", help="LetsRunFaster API key to save (lrf_...)"),
+    clear_key: bool = typer.Option(False, "--clear-key", help="Forget the saved API key"),
+    show: bool = typer.Option(False, "--show", help="Show saved settings (key prefix only)"),
+):
+    """Save/show the LetsRunFaster push target used by default on export."""
+    if show or (remote_url is None and remote_key is None and not clear_key):
+        saved = app_settings.public_config()
+        console.print(f"Target URL: [bold]{saved['remote_url']}[/bold]")
+        if saved["has_key"]:
+            console.print(f"API key: [green]saved ({saved['key_prefix']}...)[/green]")
+        else:
+            console.print("[yellow]API key: not saved[/yellow]")
+        return
+    saved = app_settings.save_config(
+        remote_url=remote_url, remote_api_key=remote_key, clear_key=clear_key
+    )
+    console.print(f"[green]✓ Saved push target:[/green] [bold]{saved['remote_url']}[/bold]")
+    if saved["has_key"]:
+        console.print(f"API key: [green]saved ({saved['key_prefix']}...)[/green]")
+    elif clear_key:
+        console.print("[yellow]API key cleared.[/yellow]")
+
+
+@app.command()
 def export(
     start_date: str = typer.Option(..., "--start", "-s", help="Start date (YYYY-MM-DD)"),
     end_date: str = typer.Option(..., "--end", "-e", help="End date (YYYY-MM-DD)"),
@@ -136,6 +163,17 @@ def export(
     if auth_res.status != AuthStatus.AUTHENTICATED:
         console.print("[red]Not authenticated. Please run 'garmin-ingestor login' first.[/red]")
         raise typer.Exit(code=1)
+
+    # Omitted flags fall back to saved `configure` settings ("" disables push).
+    saved_url, saved_key = app_settings.get_remote_settings()
+    if remote_url is None:
+        remote_url = saved_url
+    elif not remote_url.strip():
+        remote_url = None
+    if remote_api_key is None:
+        remote_api_key = saved_key
+    elif not remote_api_key.strip():
+        remote_api_key = None
 
     client = auth_mgr.get_client()
     client.login(tokenstore=auth_mgr.token_store)

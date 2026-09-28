@@ -10,6 +10,7 @@ from typing import Any, Dict
 
 from .auth import GarminAuthManager, AuthStatus
 from .exporter import GarminExporter, ExportFormat
+from . import settings as app_settings
 
 
 def send_response(req_id: Any, result: Any = None, error: Any = None):
@@ -124,6 +125,17 @@ def run_rpc_server():
                 output_dir = params.get("outputDir")
                 remote_url = params.get("remoteUrl")
                 remote_api_key = params.get("remoteApiKey")
+                # Omitted push fields fall back to saved settings; explicit ""
+                # disables pushing (same contract as the web UI endpoint).
+                saved_url, saved_key = app_settings.get_remote_settings()
+                if remote_url is None:
+                    remote_url = saved_url
+                elif not str(remote_url).strip():
+                    remote_url = None
+                if remote_api_key is None:
+                    remote_api_key = saved_key
+                elif not str(remote_api_key).strip():
+                    remote_api_key = None
                 activity_type = params.get("activityType")
                 delay = float(params.get("delay", 0.5))
 
@@ -163,6 +175,17 @@ def run_rpc_server():
                     "succeeded": sum(1 for r in results if r.success),
                     "failed": sum(1 for r in results if not r.success),
                 })
+
+            elif method == "get_remote_settings":
+                send_response(req_id, app_settings.public_config())
+
+            elif method == "save_remote_settings":
+                saved = app_settings.save_config(
+                    remote_url=params.get("remoteUrl"),
+                    remote_api_key=params.get("remoteApiKey"),
+                    clear_key=bool(params.get("clearKey", False)),
+                )
+                send_response(req_id, {"success": True, **saved})
 
             else:
                 send_response(req_id, error=f"Unknown method: {method}")

@@ -100,6 +100,28 @@ garmin-ingestor export \
   --remote-key "lrf_..."
 ```
 
+### Saved Push Target (API Key)
+
+Save the ingest URL + API key once (stored in `~/.garmin-ingestor/config.json`,
+file mode `0600`) and every interface — browser UI, CLI, RPC sidecar — defaults
+to pushing there. An explicit empty value (`--remote-url ""`, UI checkbox off)
+still exports locally only.
+
+```bash
+garmin-ingestor configure --remote-url https://letsrunfaster.com/api/activities/import --remote-key "lrf_..."
+garmin-ingestor configure --show        # URL + key prefix (never the secret)
+garmin-ingestor export --start 2025-06-01 --end 2025-07-01 --format fit   # pushes via saved target
+```
+
+### Sync New Since Last Import
+
+In the browser UI, **Sync new since last import** asks the site (via
+`GET /api/activities/latest`, Bearer-key authed, proxied through the ingestor
+backend) for your latest logged block day and sets the range to
+`latest + 1 day … today`, then previews the Garmin activities — press
+**Export Now** to import them. The lookup counts any actual day (hand-logged
+or Garmin-pushed).
+
 ## Remote Ingestion API Specification
 
 When `--remote-url` is specified, `garmin-ingestor` will send a `multipart/form-data` `POST` request for each activity:
