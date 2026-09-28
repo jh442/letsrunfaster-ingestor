@@ -1,6 +1,6 @@
 """Garmin exporter for querying activities and downloading FIT/GPX files."""
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import date, datetime
 from enum import Enum
 import io
@@ -8,10 +8,12 @@ import os
 from pathlib import Path
 import re
 import time
-from typing import Any, Callable, Generator, List, Optional
+from typing import Any, Callable, Dict, Generator, List, Optional
 import zipfile
 import requests
 from garminconnect import Garmin
+
+from .fit_parser import parse_fit_to_payload
 
 
 class ExportFormat(str, Enum):
@@ -54,6 +56,8 @@ class ExportResult:
     error_message: Optional[str] = None
     saved_path: Optional[str] = None
     remote_synced: bool = False
+    remote_matched: Optional[bool] = None
+    remote_detail: Optional[str] = None
 
 
 def sanitize_filename(name: str) -> str:
@@ -150,11 +154,13 @@ class GarminExporter:
                 saved_path_str = str(file_dest)
 
             remote_synced = False
+            remote_matched: Optional[bool] = None
+            remote_detail: Optional[str] = None
             if remote_url:
                 headers = {}
                 if remote_api_key:
                     headers["Authorization"] = f"Bearer {remote_api_key}"
-                
+
                 files = {
                     "file": (filename, data, "application/octet-stream")
                 }
@@ -165,9 +171,37 @@ class GarminExporter:
                     "start_time": activity.start_time_local,
                     "format": ext,
                 }
+                # Parsed payload (mirrors the site's ParsedGpxResult) so the
+                # import endpoint can append to the matching block day.
+                # FIT only — GPX/TCX send thin metadata + file.
+                if ext == "fit":
+                    parsed = parse_fit_to_payload(data, activity.activity_name)
+                    for key in (
+                        "distance_miles", "avg_pace", "avg_hr", "max_hr",
+                        "avg_cadence", "elev_gain_ft", "finish_time",
+                        "device", "telemetry_json",
+                    ):
+                        if parsed.get(key) not in (None, ""):
+                            form_data[key] = str(parsed[key])
+                else:
+                    if activity.distance_meters:
+                        form_data["distance_miles"] = str(round(activity.distance_meters * 0.000621371, 2))
                 resp = requests.post(remote_url, headers=headers, data=form_data, files=files, timeout=30)
                 resp.raise_for_status()
                 remote_synced = True
+                try:
+                    body = resp.json()
+                    if isinstance(body, dict):
+                        if "matched" in body:
+                            remote_matched = bool(body["matched"])
+                        if body.get("deduped"):
+                            remote_detail = "duplicate"
+                        elif body.get("replaced"):
+                            remote_detail = "updated:" + str(body.get("slot") or "")
+                        else:
+                            remote_detail = str(body.get("code") or body.get("appended_to") or "")
+                except Exception:
+                    pass
 
             return ExportResult(
                 activity_id=activity.activity_id,
@@ -177,6 +211,8 @@ class GarminExporter:
                 size_bytes=len(data),
                 saved_path=saved_path_str,
                 remote_synced=remote_synced,
+                remote_matched=remote_matched,
+                remote_detail=remote_detail,
             )
 
         except Exception as e:
