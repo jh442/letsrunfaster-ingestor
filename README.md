@@ -96,7 +96,7 @@ garmin-ingestor export \
   --start 2025-01-01 \
   --end 2025-06-01 \
   --format fit \
-  --remote-url https://letsrunfaster.com/api/activities/import \
+  --remote-url https://www.letsrunfaster.com/api/activities/import \
   --remote-key "lrf_..."
 ```
 
@@ -108,7 +108,7 @@ to pushing there. An explicit empty value (`--remote-url ""`, UI checkbox off)
 still exports locally only.
 
 ```bash
-garmin-ingestor configure --remote-url https://letsrunfaster.com/api/activities/import --remote-key "lrf_..."
+garmin-ingestor configure --remote-url https://www.letsrunfaster.com/api/activities/import --remote-key "lrf_..."
 garmin-ingestor configure --show        # URL + key prefix (never the secret)
 garmin-ingestor export --start 2025-06-01 --end 2025-07-01 --format fit   # pushes via saved target
 ```
