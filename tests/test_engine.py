@@ -10,6 +10,7 @@ from garmin_engine.exporter import (
     ActivityItem,
     ExportFormat,
     sanitize_filename,
+    sort_activities_oldest_first,
 )
 
 
@@ -75,3 +76,49 @@ if __name__ == "__main__":
         tpx_data, ext_tpx = exporter.download_activity_data(1234, ExportFormat.TPX)
         self.assertEqual(ext_tpx, "tpx")
         self.assertEqual(tpx_data, fake_xml)
+
+
+class TestExportOrdering(unittest.TestCase):
+    def _act(self, aid, start):
+        return ActivityItem(
+            activity_id=aid,
+            activity_name=f"run {aid}",
+            activity_type="running",
+            start_time_local=start,
+        )
+
+    def test_oldest_first(self):
+        acts = [
+            self._act(3, "2026-09-28 18:00:00"),
+            self._act(1, "2026-09-27 07:00:00"),
+            self._act(2, "2026-09-28 07:00:00"),
+        ]
+        ordered = sort_activities_oldest_first(acts)
+        self.assertEqual([a.activity_id for a in ordered], [1, 2, 3])
+        # Pure: input order untouched
+        self.assertEqual([a.activity_id for a in acts], [3, 1, 2])
+
+    def test_missing_timestamp_last_tie_breaks_by_id(self):
+        acts = [self._act(9, ""), self._act(5, "2026-09-28 07:00:00"), self._act(7, "")]
+        ordered = sort_activities_oldest_first(acts)
+        self.assertEqual([a.activity_id for a in ordered], [5, 7, 9])
+
+    def test_bulk_export_runs_chronologically(self):
+        exporter = GarminExporter(MagicMock())
+        seen = []
+
+        def fake_export(activity, **kwargs):
+            seen.append(activity.activity_id)
+            res = MagicMock()
+            res.success = True
+            return res
+
+        exporter.export_activity = fake_export
+        acts = [
+            self._act(30, "2026-09-28 18:00:00"),
+            self._act(10, "2026-09-27 07:00:00"),
+            self._act(20, "2026-09-28 07:00:00"),
+        ]
+        exporter.bulk_export(acts, ExportFormat.FIT, output_dir=None, delay_seconds=0)
+        # First run of the day exports first -> lands in the primary slot
+        self.assertEqual(seen, [10, 20, 30])

@@ -388,7 +388,7 @@
         } else if (msg.event === 'export_progress') {
           const { current, total, filename, success, error } = msg.data;
           updateProgress(current, total, success ? `Saved: ${filename}` : `Failed: ${error}`);
-          markActivityStatus(msg.data.activityId, success, msg.data.remoteMatched, msg.data.remoteDetail);
+          markActivityStatus(msg.data.activityId, success, msg.data.remoteMatched, msg.data.remoteDetail, msg.data.remoteConvertedPlan);
         } else if (msg.event === 'export_completed') {
           showProgress(true);
           const { total, succeeded, failed } = msg.data;
@@ -756,7 +756,7 @@
       `}).join('');
     }
 
-    function markActivityStatus(id, success, remoteMatched, remoteDetail) {
+    function markActivityStatus(id, success, remoteMatched, remoteDetail, remoteConvertedPlan) {
       const el = document.getElementById(`status-${id}`);
       if (el) {
         if (!success) {
@@ -766,6 +766,8 @@
         let push = '';
         if (remoteDetail === 'duplicate') {
           push = `<div class="text-slate-400 text-[10px] font-bold">Duplicate — skipped</div>`;
+        } else if (remoteConvertedPlan) {
+          push = `<div class="text-emerald-400 text-[10px] font-bold">✓ Plan → logged (${remoteDetail || 'primary'})</div>`;
         } else if (remoteDetail && remoteDetail.startsWith('updated')) {
           push = `<div class="text-sky-400 text-[10px] font-bold">✓ Already logged — refreshed</div>`;
         } else if (remoteMatched === true) {

@@ -12,7 +12,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from .auth import GarminAuthManager, AuthStatus
-from .exporter import GarminExporter, ExportFormat
+from .exporter import GarminExporter, ExportFormat, sort_activities_oldest_first
 from . import settings as app_settings
 
 app = FastAPI(title="LetsRunFaster Ingestor")
@@ -166,6 +166,9 @@ async def start_export(payload: ExportRequest):
             payload.start_date, payload.end_date, payload.activity_type
         )
 
+        # Oldest-first: the day's first run must land in the primary slot
+        # (Garmin returns newest-first; bulk_export sorts too, for CLI/RPC).
+        activities = sort_activities_oldest_first(activities)
         total = len(activities)
         await broadcast_event("export_started", {"total": total})
 
@@ -207,6 +210,7 @@ async def start_export(payload: ExportRequest):
                     "remoteSynced": res.remote_synced,
                     "remoteMatched": res.remote_matched,
                     "remoteDetail": res.remote_detail,
+                    "remoteConvertedPlan": res.remote_converted_plan,
                     "error": res.error_message,
                 },
             )

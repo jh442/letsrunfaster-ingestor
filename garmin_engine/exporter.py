@@ -58,6 +58,22 @@ class ExportResult:
     remote_synced: bool = False
     remote_matched: Optional[bool] = None
     remote_detail: Optional[str] = None
+    remote_converted_plan: bool = False
+
+
+def sort_activities_oldest_first(activities: List[ActivityItem]) -> List[ActivityItem]:
+    """Order activities chronologically (oldest first) for export.
+
+    Garmin returns newest-first, which would land the day's *later* run in
+    the block's primary slot and the earlier run as secondary. Exporting
+    oldest-first keeps first-run → primary, second-run → secondary.
+    ``start_time_local`` sorts lexicographically (``YYYY-MM-DD HH:MM:SS``);
+    missing timestamps sink last, ties break by activity id. Pure (copy).
+    """
+    return sorted(
+        activities,
+        key=lambda a: ((a.start_time_local or "9999"), a.activity_id),
+    )
 
 
 def sanitize_filename(name: str) -> str:
@@ -156,6 +172,7 @@ class GarminExporter:
             remote_synced = False
             remote_matched: Optional[bool] = None
             remote_detail: Optional[str] = None
+            remote_converted_plan = False
             if remote_url:
                 headers = {}
                 if remote_api_key:
@@ -194,6 +211,8 @@ class GarminExporter:
                     if isinstance(body, dict):
                         if "matched" in body:
                             remote_matched = bool(body["matched"])
+                        if body.get("converted_plan"):
+                            remote_converted_plan = True
                         if body.get("deduped"):
                             remote_detail = "duplicate"
                         elif body.get("replaced"):
@@ -213,6 +232,7 @@ class GarminExporter:
                 remote_synced=remote_synced,
                 remote_matched=remote_matched,
                 remote_detail=remote_detail,
+                remote_converted_plan=remote_converted_plan,
             )
 
         except Exception as e:
@@ -238,6 +258,7 @@ class GarminExporter:
     ) -> List[ExportResult]:
         """Bulk export multiple activities with rate-limiting backoff."""
         results: List[ExportResult] = []
+        activities = sort_activities_oldest_first(activities)
         total = len(activities)
 
         for idx, act in enumerate(activities, start=1):
