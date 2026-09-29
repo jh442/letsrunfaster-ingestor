@@ -533,12 +533,18 @@
         const data = await res.json();
         if (!res.ok) throw new Error(data.detail || 'Sync lookup failed');
         if (!data.suggested_start) throw new Error('No training block found on the site yet.');
-        const today = new Date().toISOString().split('T')[0];
-        document.getElementById('start-date').value = data.suggested_start;
+        // Local calendar date (toISOString is UTC — at 7pm CDT it already
+        // reads as tomorrow). Clamp start so the range can never invert:
+        // latest == today (or a future-dated actual) re-scans today.
+        const pad2 = (n) => String(n).padStart(2, '0');
+        const now = new Date();
+        const today = `${now.getFullYear()}-${pad2(now.getMonth() + 1)}-${pad2(now.getDate())}`;
+        const start = data.suggested_start && data.suggested_start <= today ? data.suggested_start : today;
+        document.getElementById('start-date').value = start;
         document.getElementById('end-date').value = today;
         statusEl.textContent = data.latest_date
-          ? `✓ Latest block day ${data.latest_date} — showing Garmin activities from ${data.suggested_start} to ${today}. Press Export Now to import.`
-          : `✓ No logged days yet — showing Garmin activities from block start ${data.suggested_start}. Press Export Now to import.`;
+          ? `✓ Latest block day ${data.latest_date} — showing Garmin activities from ${start} to ${today}. Press Export Now to import.`
+          : `✓ No logged days yet — showing Garmin activities from block start ${start}. Press Export Now to import.`;
         statusEl.className = 'text-[11px] text-emerald-400 font-medium mt-1.5';
         document.getElementById('btn-fetch-activities').click();
       } catch (err) {
