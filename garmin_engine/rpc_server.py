@@ -157,6 +157,7 @@ def run_rpc_server():
                         "sizeBytes": res.size_bytes,
                         "savedPath": res.saved_path,
                         "remoteSynced": res.remote_synced,
+                        "remoteConvertedPlan": res.remote_converted_plan,
                         "error": res.error_message,
                     })
 
