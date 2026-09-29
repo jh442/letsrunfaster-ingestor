@@ -5,6 +5,11 @@ from unittest.mock import MagicMock, patch
 import io
 import zipfile
 from garmin_engine.auth import GarminAuthManager, AuthStatus
+from garmin_engine.fit_parser import (
+    _build_canonical_time_series,
+    _build_splits_from_laps,
+    _build_splits_from_telemetry,
+)
 from garmin_engine.exporter import (
     GarminExporter,
     ActivityItem,
@@ -58,6 +63,61 @@ class TestGarminEngine(unittest.TestCase):
             mgr = GarminAuthManager(token_dir=tmpdir)
             res = mgr.login_with_tokens()
             self.assertEqual(res.status, AuthStatus.FAILED)
+
+
+class TestFitTelemetryShape(unittest.TestCase):
+    """The site's ElevationChart/SplitsTable read canonical keys only."""
+
+    def _samples(self, miles=2.5, pace_sec=450.0):
+        # 1Hz-ish synthetic track: distMi/timeSec/eleFt/hr/cad (legacy inputs)
+        samples = []
+        total_sec = miles * pace_sec
+        n = int(total_sec)
+        for i in range(n + 1):
+            samples.append({
+                "distMi": round(miles * i / n, 3),
+                "timeSec": round(float(i), 1),
+                "eleFt": 500 + (i % 10),
+                "hr": 150,
+                "cad": 170,
+            })
+        return samples
+
+    def test_canonical_time_series_keys(self):
+        series = _build_canonical_time_series(self._samples())
+        self.assertGreaterEqual(len(series), 2)
+        for pt in series:
+            for key in ("distanceMi", "timeSec", "paceMinPerMi", "hrBpm", "cadenceSpm", "elevationFt"):
+                self.assertIn(key, pt)
+            self.assertTrue(3.0 < pt["paceMinPerMi"] < 40.0)
+        # legacy shorthand keys must be gone
+        self.assertNotIn("distMi", series[0])
+        self.assertNotIn("eleFt", series[0])
+
+    def test_telemetry_splits_cover_full_and_partial_miles(self):
+        splits = _build_splits_from_telemetry(self._samples(miles=2.5), 150)
+        self.assertEqual(len(splits), 3)  # mile 1, 2 + 0.5 partial
+        self.assertEqual(splits[0]["mile"], 1)
+        self.assertEqual(splits[0]["pace"], "7:30")
+        self.assertTrue(any(s.get("isFastest") for s in splits))
+
+    def test_lap_splits_preferred_shape(self):
+        laps = [
+            {"total_distance": 1609.34, "total_timer_time": 440.0, "avg_heart_rate": 150,
+             "avg_cadence": 85, "total_ascent": 10.0, "total_descent": 4.0},
+            {"total_distance": 1609.34, "total_timer_time": 430.0, "avg_heart_rate": 155,
+             "avg_cadence": 86, "total_ascent": 5.0, "total_descent": 8.0},
+        ]
+        splits = _build_splits_from_laps(laps, 150)
+        assert splits is not None
+        self.assertEqual(len(splits), 2)
+        self.assertEqual(splits[1]["pace"], "7:10")
+        self.assertTrue(splits[1]["isFastest"])
+        self.assertEqual(splits[0]["cadence"], 170)  # single-leg doubled to SPM
+
+    def test_lap_splits_none_when_missing(self):
+        self.assertIsNone(_build_splits_from_laps([], 150))
+        self.assertIsNone(_build_splits_from_laps([{"sport": "running"}], 150))
 
 
 if __name__ == "__main__":
