@@ -384,6 +384,8 @@
         const msg = JSON.parse(evt.data);
         if (msg.event === 'export_started') {
           showProgress(true);
+          resetSpinnerToLoading();
+          document.getElementById('progress-status-title').textContent = 'Exporting activities...';
           updateProgress(0, msg.data.total, 'Started download...');
         } else if (msg.event === 'export_progress') {
           const { current, total, filename, success, error } = msg.data;
@@ -393,7 +395,8 @@
           showProgress(true);
           const { total, succeeded, failed } = msg.data;
           document.getElementById('progress-status-title').textContent = `Export Completed! (${succeeded}/${total} succeeded)`;
-          document.getElementById('progress-spinner').innerHTML = '<i class="fa-solid fa-check text-emerald-400 text-lg"></i>';
+          updateProgress(total, total, total > 0 ? `Done — ${succeeded}/${total} succeeded` : 'No activities in range.');
+          setSpinnerToComplete();
           state.exporting = false;
         }
       } catch (e) {
@@ -796,7 +799,7 @@
       state.exporting = true;
       showProgress(true);
       document.getElementById('progress-status-title').textContent = 'Exporting activities...';
-      document.getElementById('progress-spinner').innerHTML = '<i class="fa-solid fa-circle-notch animate-spin text-[#00e5ff] text-lg"></i>';
+      resetSpinnerToLoading();
 
       try {
         const res = await fetch('/api/activities/export', {
@@ -868,6 +871,23 @@
       const card = document.getElementById('progress-card');
       if (show) card.classList.remove('hidden');
       else card.classList.add('hidden');
+    }
+
+    // Spinner state: spinning cyan notch while exporting, static emerald
+    // check when done. The spin lives on #progress-spinner itself, so the
+    // completed check must remove `animate-spin` or it keeps rotating.
+    function resetSpinnerToLoading() {
+      const spinner = document.getElementById('progress-spinner');
+      spinner.classList.remove('text-emerald-400');
+      spinner.classList.add('animate-spin', 'text-[#00e5ff]');
+      spinner.innerHTML = '<i class="fa-solid fa-circle-notch text-lg"></i>';
+    }
+
+    function setSpinnerToComplete() {
+      const spinner = document.getElementById('progress-spinner');
+      spinner.classList.remove('animate-spin', 'text-[#00e5ff]');
+      spinner.classList.add('text-emerald-400');
+      spinner.innerHTML = '<i class="fa-solid fa-check text-lg"></i>';
     }
 
     function updateProgress(current, total, detailText) {
