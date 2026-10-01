@@ -151,10 +151,10 @@
           <div class="space-y-2">
             <label class="block text-[11px] font-bold uppercase tracking-wider text-slate-400">Quick Presets</label>
             <div class="grid grid-cols-2 gap-2">
-              <button type="button" class="preset-btn px-2.5 py-1.5 bg-[#121722]/60 hover:bg-white/[0.08] border-0 rounded-xl text-xs font-medium text-slate-300 transition cursor-pointer" data-preset="week">This Week</button>
-              <button type="button" class="preset-btn px-2.5 py-1.5 bg-[#121722]/60 hover:bg-white/[0.08] border-0 rounded-xl text-xs font-medium text-slate-300 transition cursor-pointer" data-preset="30d">Last 30d</button>
-              <button type="button" class="preset-btn px-2.5 py-1.5 bg-[#121722]/60 hover:bg-white/[0.08] border-0 rounded-xl text-xs font-medium text-slate-300 transition cursor-pointer" data-preset="90d">Last 90d</button>
-              <button type="button" class="preset-btn px-2.5 py-1.5 bg-[#121722]/60 hover:bg-white/[0.08] border-0 rounded-xl text-xs font-medium text-slate-300 transition cursor-pointer" data-preset="ytd">Year to Date</button>
+              <button type="button" class="preset-btn px-2.5 py-1.5 bg-[#0b0e14] hover:bg-white/[0.08] border-0 rounded-xl text-xs font-medium text-slate-300 transition cursor-pointer" data-preset="week">This Week</button>
+              <button type="button" class="preset-btn px-2.5 py-1.5 bg-[#0b0e14] hover:bg-white/[0.08] border-0 rounded-xl text-xs font-medium text-slate-300 transition cursor-pointer" data-preset="30d">Last 30d</button>
+              <button type="button" class="preset-btn px-2.5 py-1.5 bg-[#0b0e14] hover:bg-white/[0.08] border-0 rounded-xl text-xs font-medium text-slate-300 transition cursor-pointer" data-preset="90d">Last 90d</button>
+              <button type="button" class="preset-btn px-2.5 py-1.5 bg-[#0b0e14] hover:bg-white/[0.08] border-0 rounded-xl text-xs font-medium text-slate-300 transition cursor-pointer" data-preset="ytd">Year to Date</button>
             </div>
           </div>
 
@@ -163,12 +163,12 @@
             <div>
               <label class="block text-[11px] font-bold uppercase tracking-wider text-slate-400 mb-1">Start Date</label>
               <input id="start-date" type="date"
-                class="w-full bg-[#0b0e14] border border-transparent focus:border-orange-500/80 focus:ring-1 focus:ring-orange-500/30 text-white text-sm rounded-xl px-4 py-2.5 transition-all outline-none [color-scheme:dark] cursor-pointer">
+                class="w-full min-w-0 bg-[#0b0e14] border border-transparent focus:border-orange-500/80 focus:ring-1 focus:ring-orange-500/30 text-white text-xs rounded-xl px-3 py-2.5 transition-all outline-none [color-scheme:dark] cursor-pointer">
             </div>
             <div>
               <label class="block text-[11px] font-bold uppercase tracking-wider text-slate-400 mb-1">End Date</label>
               <input id="end-date" type="date"
-                class="w-full bg-[#0b0e14] border border-transparent focus:border-orange-500/80 focus:ring-1 focus:ring-orange-500/30 text-white text-sm rounded-xl px-4 py-2.5 transition-all outline-none [color-scheme:dark] cursor-pointer">
+                class="w-full min-w-0 bg-[#0b0e14] border border-transparent focus:border-orange-500/80 focus:ring-1 focus:ring-orange-500/30 text-white text-xs rounded-xl px-3 py-2.5 transition-all outline-none [color-scheme:dark] cursor-pointer">
             </div>
           </div>
 
@@ -189,21 +189,21 @@
                   <p class="text-[10px] text-slate-400">Full second-by-second HR & splits</p>
                 </div>
               </label>
-              <label class="flex items-center space-x-2.5 bg-[#121722]/60 border border-transparent p-2.5 rounded-xl cursor-pointer transition">
+              <label class="flex items-center space-x-2.5 bg-[#0b0e14] border border-transparent p-2.5 rounded-xl cursor-pointer transition">
                 <input type="radio" name="format" value="tcx" class="accent-[#00e5ff]">
                 <div>
                   <span class="text-xs font-bold text-slate-200">TCX</span>
                   <p class="text-[10px] text-slate-400">XML laps & trackpoints</p>
                 </div>
               </label>
-              <label class="flex items-center space-x-2.5 bg-[#121722]/60 border border-transparent p-2.5 rounded-xl cursor-pointer transition">
+              <label class="flex items-center space-x-2.5 bg-[#0b0e14] border border-transparent p-2.5 rounded-xl cursor-pointer transition">
                 <input type="radio" name="format" value="gpx" class="accent-[#00e5ff]">
                 <div>
                   <span class="text-xs font-bold text-slate-200">GPX</span>
                   <p class="text-[10px] text-slate-400">GPS trackpoints only</p>
                 </div>
               </label>
-              <label class="flex items-center space-x-2.5 bg-[#121722]/60 border border-transparent p-2.5 rounded-xl cursor-pointer transition">
+              <label class="flex items-center space-x-2.5 bg-[#0b0e14] border border-transparent p-2.5 rounded-xl cursor-pointer transition">
                 <input type="radio" name="format" value="tpx" class="accent-[#00e5ff]">
                 <div>
                   <span class="text-xs font-bold text-slate-200">TPX</span>
@@ -516,7 +516,10 @@
     });
 
     // Sync-new: ask the webapp (via local proxy) for the latest block day,
-    // default the range to suggested_start..today, and preview the activities.
+    // then re-scan from that day through today. Starting on latest_date
+    // itself (rather than the day after) catches a second activity logged
+    // later the same day — already-imported activities are skipped as
+    // duplicates server-side, so re-scanning is idempotent.
     document.getElementById('btn-sync-new').addEventListener('click', async () => {
       const statusEl = document.getElementById('sync-new-status');
       const btn = document.getElementById('btn-sync-new');
@@ -535,18 +538,22 @@
         });
         const data = await res.json();
         if (!res.ok) throw new Error(data.detail || 'Sync lookup failed');
-        if (!data.suggested_start) throw new Error('No training block found on the site yet.');
+        if (!data.latest_date && !data.suggested_start) throw new Error('No training block found on the site yet.');
         // Local calendar date (toISOString is UTC — at 7pm CDT it already
         // reads as tomorrow). Clamp start so the range can never invert:
-        // latest == today (or a future-dated actual) re-scans today.
+        // a future-dated actual re-scans today.
         const pad2 = (n) => String(n).padStart(2, '0');
         const now = new Date();
         const today = `${now.getFullYear()}-${pad2(now.getMonth() + 1)}-${pad2(now.getDate())}`;
-        const start = data.suggested_start && data.suggested_start <= today ? data.suggested_start : today;
+        // Re-scan from the latest logged day (not the day after) so a
+        // second same-day activity is never skipped. Falls back to the
+        // block start when nothing is logged yet.
+        const rawStart = data.latest_date || data.suggested_start;
+        const start = rawStart && rawStart <= today ? rawStart : today;
         document.getElementById('start-date').value = start;
         document.getElementById('end-date').value = today;
         statusEl.textContent = data.latest_date
-          ? `✓ Latest block day ${data.latest_date} — showing Garmin activities from ${start} to ${today}. Press Export Now to import.`
+          ? `✓ Latest block day ${data.latest_date} — re-scanning from ${start} to ${today} for anything new. Press Export Now to import.`
           : `✓ No logged days yet — showing Garmin activities from block start ${start}. Press Export Now to import.`;
         statusEl.className = 'text-[11px] text-emerald-400 font-medium mt-1.5';
         document.getElementById('btn-fetch-activities').click();
@@ -566,7 +573,7 @@
           if (r.checked) {
             parent.className = 'flex items-center space-x-2.5 bg-[#1a2335] border border-transparent p-2.5 rounded-xl cursor-pointer transition shadow-sm';
           } else {
-            parent.className = 'flex items-center space-x-2.5 bg-[#121722]/60 border border-transparent p-2.5 rounded-xl cursor-pointer transition';
+            parent.className = 'flex items-center space-x-2.5 bg-[#0b0e14] border border-transparent p-2.5 rounded-xl cursor-pointer transition';
           }
         });
       });

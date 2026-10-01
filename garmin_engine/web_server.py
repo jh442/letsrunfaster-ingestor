@@ -273,7 +273,8 @@ def fetch_sync_latest(payload: SyncLatestRequest):
     settings when the request omits them, derives the sibling
     /activities/latest URL from the import URL, and forwards the call with
     the saved Bearer key. The UI defaults its start date to
-    ``suggested_start`` (latest actual day + 1).
+    ``latest_date`` (the latest logged day itself, re-scanned so a second
+    same-day activity is never skipped; duplicates are skipped).
     """
     import requests as http_requests
 
