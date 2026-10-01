@@ -33,6 +33,30 @@ class TestWebServer(unittest.TestCase):
         # Logo icon removed - flat text logo only
         self.assertNotIn("fa-person-running", resp.text)
 
+    def test_export_range_contrast_and_date_inputs(self):
+        # Issue #9: quick presets + unselected format buttons use the page
+        # background for contrast; date inputs use small text so the picker
+        # icon does not clip the value.
+        resp = client.get("/")
+        self.assertEqual(resp.status_code, 200)
+        self.assertIn("preset-btn px-2.5 py-1.5 bg-[#0b0e14]", resp.text)
+        self.assertNotIn("preset-btn px-2.5 py-1.5 bg-[#121722]", resp.text)
+        self.assertIn(
+            "parent.className = 'flex items-center space-x-2.5 bg-[#0b0e14]",
+            resp.text,
+        )
+        self.assertEqual(resp.text.count("text-white text-xs rounded-xl px-3 py-2.5"), 2)
+
+    def test_sync_new_rescans_latest_day(self):
+        # Issue #9: sync-new must start at latest_date itself so a second
+        # same-day activity is never skipped (duplicates are skipped
+        # server-side), falling back to suggested_start only when nothing
+        # is logged yet.
+        resp = client.get("/")
+        self.assertEqual(resp.status_code, 200)
+        self.assertIn("data.latest_date || data.suggested_start", resp.text)
+        self.assertNotIn("if (!data.suggested_start) throw", resp.text)
+
     def test_clear_exports_endpoint_success(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             test_dir = Path(tmpdir) / "exports"
