@@ -164,7 +164,10 @@ jobs:
         # it just downloaded, so a corrupted or swapped artifact fails closed.
         run: |
           cd binaries
-          find . -type f -exec sha256sum {} \; \
+          # Exclude the checksum file itself: redirecting into it creates an
+          # empty file that find would otherwise hash (and `sha256sum -c`
+          # would then reject).
+          find . -type f ! -name SHA256SUMS.txt -exec sha256sum {} \; \
             | sed 's#  .*/#  #' \
             | sort -k2 > SHA256SUMS.txt
           cat SHA256SUMS.txt
