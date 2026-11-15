@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+import logging
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -18,6 +19,8 @@ from . import paths
 from . import settings as app_settings
 
 app = FastAPI(title="LetsRunFaster Ingestor")
+
+_LOGGER = logging.getLogger(__name__)
 
 app.add_middleware(
     CORSMiddleware,
@@ -101,8 +104,10 @@ def get_auth_status():
 @app.post("/api/auth/login")
 def login(payload: LoginRequest):
     global active_client
+    _LOGGER.info("login: request received for %s", payload.email)
     res, client = auth_mgr.login_with_credentials(payload.email, payload.password)
     active_client = client
+    _LOGGER.info("login: responding status=%s mfa=%s", res.status.value, res.status == AuthStatus.MFA_REQUIRED)
     return {
         "status": res.status.value,
         "message": res.message,

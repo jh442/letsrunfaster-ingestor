@@ -18,12 +18,22 @@ The desktop shell starts the engine headless instead:
 
 block_cipher = None
 
+# Keep the distribution metadata for the libraries whose versions land in the
+# diagnostics log. Without it a frozen build reports every dependency as
+# "unknown", which is exactly the information needed to diagnose a crash.
+from PyInstaller.utils.hooks import copy_metadata  # noqa: E402
+
 a = Analysis(
     ["garmin_engine/launcher.py"],
     pathex=[],
     binaries=[],
     datas=[
         ("garmin_engine/static", "garmin_engine/static"),
+        *copy_metadata("garminconnect"),
+        *copy_metadata("curl_cffi"),
+        *copy_metadata("requests"),
+        *copy_metadata("fastapi"),
+        *copy_metadata("uvicorn"),
     ],
     hiddenimports=[
         "uvicorn.logging",

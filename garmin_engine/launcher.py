@@ -97,6 +97,12 @@ def run_ui(
 ) -> None:
     """Start the FastAPI server and optionally open the browser (blocking)."""
     _ensure_std_streams()
+    # Must happen before uvicorn starts: a native crash after this point
+    # leaves a stack dump instead of silence, and every later stage is
+    # timestamped in the same file.
+    from garmin_engine import diagnostics
+
+    diagnostics.install()
     import uvicorn
 
     from garmin_engine.web_server import app
@@ -114,12 +120,29 @@ def run_ui(
     server = uvicorn.Server(uvicorn.Config(app, log_level=log_level))
     try:
         server.run(sockets=[sock])
+    except SystemExit as exc:
+        # Click/uvicorn call sys.exit on some failures; without this the log
+        # just stops and looks like a crash.
+        diagnostics.write(f"SystemExit({exc.code!r}) propagated out of the server loop")
+        raise
+    except BaseException:
+        diagnostics.log_exception("unhandled error in the server loop")
+        raise
     finally:
+        diagnostics.write(
+            f"server loop ended should_exit={getattr(server, 'should_exit', None)} "
+            f"started={getattr(server, 'started', None)}"
+        )
         sock.close()
 
 
 def main() -> None:
     _ensure_std_streams()
+    from garmin_engine import diagnostics
+
+    # Applies to every entry point (UI and CLI): a crash while exporting
+    # deserves the same evidence as a crash while serving the UI.
+    diagnostics.install()
     # Double-clicked (no CLI args) -> launch the browser UI.
     if len(sys.argv) <= 1:
         run_ui()
