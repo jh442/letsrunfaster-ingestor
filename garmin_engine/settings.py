@@ -3,8 +3,9 @@
 The browser UI already kept the ingest URL + API key in localStorage, but
 that never reached the CLI or the RPC sidecar — every export needed
 ``--remote-url`` / ``--remote-key`` flags again. This module stores the same
-pair in ``~/.garmin-ingestor/config.json`` (file mode 0600: the API key is a
-bearer secret) so the web UI, CLI, and RPC server all default to it.
+pair in ``config.json`` inside the app state directory (``LRF_INGESTOR_HOME``
+or ``~/.garmin-ingestor``; file mode 0600 because the API key is a bearer
+secret) so the web UI, CLI, and RPC server all default to it.
 
 Only the key *prefix* (``lrf_...`` first 12 chars, same as the site's profile
 page shows) is ever returned to UI callers — never the full key.
@@ -14,6 +15,8 @@ import json
 import os
 from pathlib import Path
 from typing import Any, Dict, Optional, Tuple
+
+from . import paths
 
 DEFAULT_REMOTE_URL = "https://www.letsrunfaster.com/api/activities/import"
 
@@ -41,8 +44,8 @@ def config_path() -> Path:
     """Location of the JSON settings file (overridable in tests)."""
     override = os.environ.get("LRF_INGESTOR_CONFIG")
     if override:
-        return Path(override)
-    return Path.home() / ".garmin-ingestor" / "config.json"
+        return Path(override).expanduser()
+    return paths.config_file()
 
 
 def load_config() -> Dict[str, Any]:
@@ -59,12 +62,15 @@ def save_config(
     remote_url: Optional[str] = None,
     remote_api_key: Optional[str] = None,
     clear_key: bool = False,
+    push_enabled: Optional[bool] = None,
+    export_dir: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Merge one or both push settings into the settings file.
 
     ``remote_api_key=None`` leaves the stored key untouched; ``clear_key=True``
-    (or an empty-string key) removes it. Returns the stored mapping minus the
-    secret (``remote_url``, ``has_key``, ``key_prefix``).
+    (or an empty-string key) removes it. ``export_dir=""`` clears the saved
+    destination. Returns the stored mapping minus the secret (``remote_url``,
+    ``has_key``, ``key_prefix``).
     """
     cfg = load_config()
     if remote_url is not None:
@@ -77,6 +83,16 @@ def save_config(
         cfg.pop("remote_api_key", None)
     elif remote_api_key is not None and remote_api_key.strip():
         cfg["remote_api_key"] = remote_api_key.strip()
+
+    if push_enabled is not None:
+        cfg["push_enabled"] = bool(push_enabled)
+    if export_dir is not None:
+        if export_dir.strip():
+            # Absolute so the value survives a different working directory
+            # (the desktop shell launches the engine from its userData dir).
+            cfg["export_dir"] = str(paths.resolve_export_dir(export_dir))
+        else:
+            cfg.pop("export_dir", None)
 
     path = config_path()
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -99,6 +115,11 @@ def public_config(cfg: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         "url_customized": bool(cfg.get("remote_url")),
         "has_key": bool(key.strip()),
         "key_prefix": key.strip()[:12] if key.strip() else None,
+        # Preferences live here rather than in localStorage: the desktop shell
+        # binds a fresh port on every launch, and localStorage is origin-scoped,
+        # so anything stored there would be silently lost each restart.
+        "push_enabled": bool(cfg.get("push_enabled", True)),
+        "export_dir": cfg.get("export_dir") or None,
     }
 
 

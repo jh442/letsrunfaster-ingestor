@@ -13,6 +13,8 @@ from pydantic import BaseModel
 
 from .auth import GarminAuthManager, AuthStatus
 from .exporter import GarminExporter, ExportFormat, sort_activities_oldest_first
+from .version import get_version
+from . import paths
 from . import settings as app_settings
 
 app = FastAPI(title="LetsRunFaster Ingestor")
@@ -61,11 +63,29 @@ class ExportRequest(BaseModel):
     start_date: str
     end_date: str
     format: str = "fit"
-    output_dir: str = "./garmin_exports"
+    # None => the default destination (Documents/LetsRunFaster). Relative
+    # paths resolve against the home directory, never the working directory.
+    output_dir: Optional[str] = None
     remote_url: Optional[str] = None
     remote_api_key: Optional[str] = None
     activity_type: Optional[str] = None
     delay: float = 0.5
+
+
+@app.get("/api/health")
+def get_health():
+    """Liveness probe: the desktop shell retries the window until this is ok."""
+    return {"ok": True, "app": "lrf-ingestor", "version": get_version()}
+
+
+@app.get("/api/config")
+def get_config():
+    """Runtime defaults the page cannot infer from its own URL."""
+    return {
+        "version": get_version(),
+        "app_home": str(paths.app_home()),
+        "default_output_dir": str(paths.default_export_dir()),
+    }
 
 
 @app.get("/api/auth/status")
@@ -179,7 +199,7 @@ async def start_export(payload: ExportRequest):
             "tpx": ExportFormat.TPX,
         }
         export_fmt = fmt_map.get(payload.format.lower(), ExportFormat.FIT)
-        dest_dir = Path(payload.output_dir)
+        dest_dir = paths.resolve_export_dir(payload.output_dir)
 
         # Run export loop
         results = []
@@ -230,13 +250,15 @@ async def start_export(payload: ExportRequest):
 
 
 class ClearExportFolderRequest(BaseModel):
-    output_dir: str = "./garmin_exports"
+    output_dir: Optional[str] = None
 
 
 class RemoteSettingsRequest(BaseModel):
     remote_url: Optional[str] = None
     remote_api_key: Optional[str] = None
     clear_key: bool = False
+    push_enabled: Optional[bool] = None
+    export_dir: Optional[str] = None
 
 
 class SyncLatestRequest(BaseModel):
@@ -252,7 +274,7 @@ def get_remote_settings():
 
 @app.post("/api/settings/remote")
 def save_remote_settings(payload: RemoteSettingsRequest):
-    """Persist the ingest URL + API key to ~/.garmin-ingestor/config.json."""
+    """Persist the push target and UI preferences to the app state directory."""
     if payload.remote_url is not None and payload.remote_url.strip() == "":
         raise HTTPException(status_code=400, detail="Remote URL cannot be empty.")
     if payload.remote_api_key is not None and payload.clear_key:
@@ -261,6 +283,8 @@ def save_remote_settings(payload: RemoteSettingsRequest):
         remote_url=payload.remote_url,
         remote_api_key=payload.remote_api_key,
         clear_key=payload.clear_key,
+        push_enabled=payload.push_enabled,
+        export_dir=payload.export_dir,
     )
     return {"success": True, **saved}
 
@@ -312,7 +336,7 @@ def clear_export_folder(payload: ClearExportFolderRequest):
     if not raw_dir:
         raise HTTPException(status_code=400, detail="Export folder path cannot be empty.")
 
-    target_dir = Path(raw_dir).resolve()
+    target_dir = paths.resolve_export_dir(raw_dir).resolve()
 
     # Safety checks: target directory must exist and be a directory
     if not target_dir.exists():

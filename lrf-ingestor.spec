@@ -1,6 +1,9 @@
 # -*- mode: python ; coding: utf-8 -*-
 """PyInstaller one-file build for Garmin Ingestor.
 
+The UI must be built first (its output is what gets bundled):
+    cd ui && npm install && npm run build
+
 Build locally:
     pip install pyinstaller
     pyinstaller lrf-ingestor.spec
@@ -9,6 +12,8 @@ Output: dist/LrfIngestor (or LrfIngestor.exe on Windows).
 Double-click it with no arguments to launch the browser UI.
 Run it with arguments to use the CLI, e.g.:
     ./dist/LrfIngestor export --start 2025-01-01 --end 2025-06-01
+The desktop shell starts the engine headless instead:
+    ./dist/LrfIngestor ui --no-browser --port 0
 """
 
 block_cipher = None

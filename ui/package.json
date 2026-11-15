@@ -1,0 +1,18 @@
+{
+  "name": "lrf-ingestor-ui",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Renderer UI for the LetsRunFaster Ingestor, built into garmin_engine/static.",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "devDependencies": {
+    "autoprefixer": "^10.4.21",
+    "postcss": "^8.5.6",
+    "tailwindcss": "^3.4.19",
+    "vite": "^7.3.8"
+  }
+}

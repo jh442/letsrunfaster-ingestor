@@ -1,0 +1,122 @@
+/* Self-hosted fonts: the packaged app must render identically with no
+   network. Variable woff2, latin + latin-ext subsets only. */
+@font-face {
+  font-family: 'Plus Jakarta Sans Variable';
+  font-style: normal;
+  font-display: swap;
+  font-weight: 200 800;
+  src: url(./fonts/plus-jakarta-sans-latin-ext-wght-normal.woff2) format('woff2-variations');
+  unicode-range: U+0100-02BA,U+02BD-02C5,U+02C7-02CC,U+02CE-02D7,U+02DD-02FF,U+0304,U+0308,U+0329,U+1D00-1DBF,U+1E00-1E9F,U+1EF2-1EFF,U+2020,U+20A0-20AB,U+20AD-20C0,U+2113,U+2C60-2C7F,U+A720-A7FF;
+}
+
+@font-face {
+  font-family: 'Plus Jakarta Sans Variable';
+  font-style: normal;
+  font-display: swap;
+  font-weight: 200 800;
+  src: url(./fonts/plus-jakarta-sans-latin-wght-normal.woff2) format('woff2-variations');
+  unicode-range: U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+0304,U+0308,U+0329,U+2000-206F,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD;
+}
+
+@font-face {
+  font-family: 'Space Grotesk Variable';
+  font-style: normal;
+  font-display: swap;
+  font-weight: 300 700;
+  src: url(./fonts/space-grotesk-latin-ext-wght-normal.woff2) format('woff2-variations');
+  unicode-range: U+0100-02BA,U+02BD-02C5,U+02C7-02CC,U+02CE-02D7,U+02DD-02FF,U+0304,U+0308,U+0329,U+1D00-1DBF,U+1E00-1E9F,U+1EF2-1EFF,U+2020,U+20A0-20AB,U+20AD-20C0,U+2113,U+2C60-2C7F,U+A720-A7FF;
+}
+
+@font-face {
+  font-family: 'Space Grotesk Variable';
+  font-style: normal;
+  font-display: swap;
+  font-weight: 300 700;
+  src: url(./fonts/space-grotesk-latin-wght-normal.woff2) format('woff2-variations');
+  unicode-range: U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+0304,U+0308,U+0329,U+2000-206F,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD;
+}
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root { color-scheme: dark; }
+html { overflow-x: clip; }
+
+/* Tailwind's preflight does not neutralize the `hidden` attribute, and the
+   UA-origin `[hidden]{display:none}` loses to any author `display` utility
+   (e.g. `class="grid" hidden`). The UI toggles whole sections via `hidden`. */
+[hidden] { display: none !important; }
+
+body {
+  font-family: 'Plus Jakarta Sans Variable', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* One icon system: 24px grid, 1.75 stroke, inherits color. */
+.icon {
+  width: 1em; height: 1em; flex: none;
+  fill: none; stroke: currentColor;
+  stroke-width: 1.75; stroke-linecap: round; stroke-linejoin: round;
+}
+
+/* Micro-label: the parent site's uppercase section voice. */
+.micro {
+  font-size: 10px; line-height: 1.2; font-weight: 700;
+  letter-spacing: 0.12em; text-transform: uppercase; color: #94a3b8;
+}
+
+::selection { background: #f97316; color: #fff; }
+input, textarea { caret-color: #38bdf8; }
+
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-track { background: #0b0e14; }
+::-webkit-scrollbar-thumb { background: #1e293b; border-radius: 4px; border: 2px solid #0b0e14; }
+::-webkit-scrollbar-thumb:hover { background: #334155; }
+
+button:focus-visible, a:focus-visible { outline: 2px solid #38bdf8; outline-offset: 2px; }
+input:focus-visible { outline: none; }
+
+/* Quick-range pills mirror the parent site's segmented nav: the current
+   range is a white pill, the rest are quiet surfaces. */
+.preset-btn[aria-pressed="true"] { background: #f8fafc; color: #0f172a; }
+.preset-btn[aria-pressed="true"]:hover { background: #fff; }
+
+/* Format cards: flat by default, sky ring when selected. :has keeps the
+   selected state in CSS so the JS never rewrites class strings. */
+.format-card { background: #0b0e14; border: 1px solid transparent; }
+.format-card:hover { background: #0f1622; }
+.format-card:has(input:checked) { background: #182234; border-color: rgba(56, 189, 248, 0.45); }
+.format-radio {
+  width: 14px; height: 14px; border-radius: 999px;
+  border: 1.5px solid #475569; display: grid; place-items: center;
+  transition: border-color 150ms ease;
+}
+.format-card:has(input:checked) .format-radio { border-color: #38bdf8; }
+.format-card:has(input:checked) .format-radio::after {
+  content: ""; width: 6px; height: 6px; border-radius: 999px; background: #38bdf8;
+}
+
+.unit-btn[aria-pressed="true"] { background: #1e293b; color: #f8fafc; }
+
+/* Segmented progress: the weekly-build bars from the parent feed,
+   reduced to a single track. */
+.progress-segments { position: relative; }
+.progress-segments::after {
+  content: ""; position: absolute; inset: 0; border-radius: 999px; pointer-events: none;
+  background-image: repeating-linear-gradient(90deg, transparent 0 7px, #0b0e14 7px 9px);
+}
+
+@keyframes fade-up {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: none; }
+}
+.toast { animation: fade-up 180ms cubic-bezier(0.22, 1, 0.36, 1); }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+

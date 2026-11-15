@@ -78,6 +78,17 @@ garmin-ingestor ui
 ```
 This opens `http://localhost:8000` with an interface to log in, view activities, configure date presets, and track real-time download progress over WebSockets.
 
+For embedding (the desktop shell, a launcher, CI), suppress the browser and
+let the OS pick a port:
+```bash
+garmin-ingestor ui --no-browser --port 0
+# stdout: LRF_READY url=http://127.0.0.1:53421 port=53421 pid=8123 version=0.2.0
+```
+Wait for that single `LRF_READY` line, then poll `GET /api/health`
+(`{"ok": true, "version": "..."}`) before showing a window. `GET /api/config`
+reports `default_output_dir` (the folder exports go to unless overridden) and
+the app state directory.
+
 ### 4. List Activities in a Date Range (CLI)
 ```bash
 garmin-ingestor list-activities --start 2025-01-01 --end 2025-06-01
@@ -102,10 +113,16 @@ garmin-ingestor export \
 
 ### Saved Push Target (API Key)
 
-Save the ingest URL + API key once (stored in `~/.garmin-ingestor/config.json`,
-file mode `0600`) and every interface — browser UI, CLI, RPC sidecar — defaults
-to pushing there. An explicit empty value (`--remote-url ""`, UI checkbox off)
+Save the ingest URL + API key once (stored in `config.json` inside the app
+state directory — `LRF_INGESTOR_HOME` if set, else `~/.garmin-ingestor`; file
+mode `0600`) and every interface — browser UI, CLI, RPC sidecar — defaults to
+pushing there. An explicit empty value (`--remote-url ""`, UI checkbox off)
 still exports locally only.
+
+`config.json` also remembers the UI's push toggle (`push_enabled`) and export
+destination (`export_dir`, always stored absolute). They live server-side
+rather than in `localStorage` because the desktop shell binds a new port on
+each launch, which changes the page origin.
 
 ```bash
 garmin-ingestor configure --remote-url https://www.letsrunfaster.com/api/activities/import --remote-key "lrf_..."
@@ -146,6 +163,31 @@ When `--remote-url` is specified, `garmin-ingestor` will send a `multipart/form-
     day (distance ±0.05mi, HR ±2, duration ±30s): refreshed in place, no duplicate row
   - `{ ok:true, matched:false, code:"no_block_found", activity_date }` — no block
     covers that date; export again after creating one
+
+## Developing the UI
+
+The renderer lives in `ui/` (Vite + Tailwind v3) and is **built into**
+`garmin_engine/static`, which is what FastAPI serves and what PyInstaller
+bundles. The build output is committed on purpose: installing the Python
+package never requires Node.
+
+```bash
+cd ui
+npm install
+npm run build        # -> ../garmin_engine/static (index.html + assets/)
+
+# live reload against a running engine
+garmin-ingestor ui --no-browser &
+npm run dev
+```
+
+- Edit `ui/index.html`, `ui/src/main.js`, `ui/src/styles.css`. Do **not** edit
+  `garmin_engine/static/index.html`; it is generated and CI fails if it is
+  stale after a UI change.
+- Fonts are self-hosted (`ui/src/fonts`, OFL) and icons are one inline SVG
+  sprite, so the app renders with no network access.
+- Native capabilities (folder picker, later keychain access) live behind
+  `ui/src/platform.js`, which is a no-op outside Electron.
 
 ## Running Tests
 ```bash

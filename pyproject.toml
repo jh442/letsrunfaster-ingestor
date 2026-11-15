@@ -1,6 +1,6 @@
 [project]
 name = "garmin-ingestor"
-version = "0.1.0"
+dynamic = ["version"]
 description = "Bulk export activities from Garmin Connect (FIT/GPX) to local storage or remote API"
 authors = [{ name = "Joffroi" }]
 readme = "README.md"
@@ -25,6 +25,9 @@ lrf-ingestor = "garmin_engine.cli:app"
 
 [tool.setuptools.packages.find]
 include = ["garmin_engine*"]
+
+[tool.setuptools.dynamic]
+version = { attr = "garmin_engine.version.__version__" }
 
 [build-system]
 requires = ["setuptools>=61.0"]
