@@ -103,6 +103,9 @@ def run_ui(
     from garmin_engine import diagnostics
 
     diagnostics.install()
+    # A liveness line every 15s, so a log that stops proves when the process
+    # died rather than only showing the last request it served.
+    diagnostics.start_heartbeat()
     import uvicorn
 
     from garmin_engine.web_server import app

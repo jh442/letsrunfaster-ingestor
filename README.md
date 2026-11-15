@@ -105,6 +105,27 @@ default because they took the engine down with no traceback. Override with
 `LRF_ENABLE_CFFI=1` to use them, or `LRF_ENABLE_CFFI=0` to force the plain
 `requests` strategies everywhere.
 
+`logs/engine-python.log` also gets a heartbeat line every 15 seconds, so a
+log that stops tells you *when* the process died, not just which request it
+served last.
+
+#### Bisecting a silent crash
+
+When the process disappears with no traceback, run the built-in self-check
+from a terminal — it exercises TLS, `requests`, `curl_cffi`, a Garmin token
+restore, config writes, and the export folder one step at a time, writing
+`diagnose: begin <step>` / `end <step>` around each:
+
+```bash
+# Linux/macOS
+./LrfIngestor diagnose
+
+# Windows (installed desktop app)
+& "$env:LOCALAPPDATA\Programs\LetsRunFaster Ingestor\resources\bin\lrf-ingestor.exe" diagnose
+```
+
+If a run stops mid-step, that step's library is the one killing the process.
+
 ### 4. List Activities in a Date Range (CLI)
 ```bash
 garmin-ingestor list-activities --start 2025-01-01 --end 2025-06-01

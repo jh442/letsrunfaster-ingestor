@@ -43,6 +43,7 @@ import platform
 import sys
 import tempfile
 import threading
+import time
 import traceback
 from pathlib import Path
 from typing import Optional, TextIO
@@ -225,3 +226,28 @@ def install() -> Optional[Path]:
 def log_exception(context: str) -> None:
     """Record the exception currently being handled, with its traceback."""
     write(f"{context}:\n{traceback.format_exc()}")
+
+
+_heartbeat_started = False
+
+
+def start_heartbeat(interval: float = 15.0) -> None:
+    """Write a liveness line every ``interval`` seconds (file only).
+
+    This answers a question nothing else can: did the engine die *while* the
+    user did something, or had it already died silently? Compare the last
+    heartbeat with the last request in ``engine.log``. Daemon thread, so it
+    never delays shutdown; failures are swallowed by :func:`write`.
+    """
+    global _heartbeat_started
+    if _heartbeat_started or _fault_file is None:
+        return
+    _heartbeat_started = True
+
+    def _beat() -> None:
+        started = time.monotonic()
+        while True:
+            time.sleep(interval)
+            write(f"heartbeat uptime={int(time.monotonic() - started)}s pid={os.getpid()}")
+
+    threading.Thread(target=_beat, name="lrf-heartbeat", daemon=True).start()
