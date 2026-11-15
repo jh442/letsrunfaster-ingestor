@@ -144,6 +144,37 @@ class TestDiagnostics(unittest.TestCase):
             path = diagnostics.log_path()
         self.assertTrue(str(path).endswith("engine-python.log"))
 
+    def test_heartbeat_is_written_and_survives_step_errors(self):
+        script = (
+            "import threading, time\n"
+            "from garmin_engine import diagnostics, diagnose\n"
+            "diagnostics.install()\n"
+            "diagnostics.start_heartbeat(interval=0.2)\n"
+            "def boom():\n"
+            "    raise ConnectionError('tls died')\n"
+            "code = diagnose.run([('good', lambda: 'ok'), ('bad', boom), ('after', lambda: 'still here')])\n"
+            "time.sleep(0.5)\n"
+            "print('code', code)\n"
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            env = {**os.environ, "LRF_INGESTOR_HOME": tmp}
+            result = subprocess.run(
+                [sys.executable, "-c", script],
+                capture_output=True,
+                text=True,
+                env=env,
+                timeout=120,
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn("code 0", result.stdout)
+            text = (Path(tmp) / "logs" / "engine-python.log").read_text(encoding="utf-8")
+        # The begin line is what identifies the step a crash happened in.
+        self.assertIn("diagnose: begin bad", text)
+        self.assertIn("failed: ConnectionError: tls died", text)
+        self.assertIn("diagnose: begin after", text)
+        self.assertIn("diagnose: all steps completed", text)
+        self.assertIn("heartbeat uptime=", text)
+
 
 if __name__ == "__main__":  # pragma: no cover
     unittest.main()

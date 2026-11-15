@@ -266,5 +266,18 @@ def ui(
     run_ui(host=host, port=port, open_browser=open_browser and not no_browser)
 
 
+@app.command()
+def diagnose():
+    """Check TLS, HTTP, Garmin, and config one step at a time.
+
+    Use this when the app stops without a Python error: every step writes
+    begin/end lines to logs/engine-python.log, so the last line names the
+    primitive that killed the process.
+    """
+    from .diagnose import run
+
+    raise typer.Exit(code=run())
+
+
 if __name__ == "__main__":
     app()
