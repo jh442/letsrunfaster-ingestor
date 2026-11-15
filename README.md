@@ -89,6 +89,22 @@ Wait for that single `LRF_READY` line, then poll `GET /api/health`
 reports `default_output_dir` (the folder exports go to unless overridden) and
 the app state directory.
 
+#### When it crashes
+
+The engine writes `<app home>/logs/engine-python.log` on every run: platform,
+Python and library versions, `curl_cffi` availability, uncaught exceptions
+(including ones on FastAPI's worker threads), a `faulthandler` stack dump if
+the interpreter dies from a signal or an access violation, and a marker when
+Python exits on its own. A log that stops with no traceback and no stack dump
+means the process was killed outright (security software, a forced
+`TerminateProcess`) rather than failing in code.
+
+Login normally tries Garmin's `curl_cffi` strategies first (native libcurl and
+OpenSSL, needed for TLS impersonation). On Windows ARM64 those are skipped by
+default because they took the engine down with no traceback. Override with
+`LRF_ENABLE_CFFI=1` to use them, or `LRF_ENABLE_CFFI=0` to force the plain
+`requests` strategies everywhere.
+
 ### 4. List Activities in a Date Range (CLI)
 ```bash
 garmin-ingestor list-activities --start 2025-01-01 --end 2025-06-01

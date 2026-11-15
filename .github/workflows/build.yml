@@ -111,6 +111,10 @@ jobs:
           BIN=./LrfIngestor
           [ -f "$BIN.exe" ] && BIN="$BIN.exe"
           chmod +x "$BIN" 2>/dev/null || true
+          # Isolated state directory: proves the diagnostics log lands where
+          # the desktop shell will look for it.
+          export LRF_INGESTOR_HOME="$RUNNER_TEMP/lrf-engine-home"
+          mkdir -p "$LRF_INGESTOR_HOME"
           "$BIN" ui --no-browser --port 0 > /tmp/engine.log 2>&1 &
           ENGINE_PID=$!
           for _ in $(seq 1 30); do
@@ -121,7 +125,13 @@ jobs:
           grep -q '^LRF_READY ' /tmp/engine.log || { echo "engine never reported ready"; kill $ENGINE_PID; exit 1; }
           URL=$(grep -o 'url=[^ ]*' /tmp/engine.log | head -1 | cut -d= -f2)
           curl -fsS "$URL/api/health" | grep -q '"ok":true' || { echo "health check failed"; kill $ENGINE_PID; exit 1; }
+          DIAG="$LRF_INGESTOR_HOME/logs/engine-python.log"
+          grep -q 'engine startup version=' "$DIAG" || { echo "no diagnostics log at $DIAG"; kill $ENGINE_PID; exit 1; }
+          grep -q 'engine deps garminconnect=' "$DIAG" || { echo "diagnostics log has no dependency banner"; kill $ENGINE_PID; exit 1; }
           kill $ENGINE_PID 2>/dev/null || true
+          wait $ENGINE_PID 2>/dev/null || true
+          echo "--- engine diagnostics ---"
+          cat "$DIAG"
 
       - name: Rename Windows ARM binary
         if: runner.os == 'Windows' && runner.arch == 'ARM64'
