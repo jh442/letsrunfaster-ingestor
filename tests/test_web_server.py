@@ -2,6 +2,7 @@
 
 import json
 import os
+import re
 import tempfile
 import unittest
 from pathlib import Path
@@ -14,7 +15,41 @@ from garmin_engine import settings as app_settings
 client = TestClient(app)
 
 
+def _built_assets():
+    """The page plus the CSS/JS bundles it references.
+
+    The UI is built by Vite (``ui/`` -> ``garmin_engine/static``), so styling
+    assertions have to read the emitted stylesheet rather than the HTML.
+    Filenames are stable by config; they are still discovered here so a
+    naming change fails loudly instead of silently asserting nothing.
+    """
+    index = client.get("/")
+    css = re.search(r'href="\./(assets/[^"]+\.css)"', index.text)
+    js = re.search(r'src="\./(assets/[^"]+\.js)"', index.text)
+    css_resp = client.get("/" + css.group(1)) if css else None
+    js_resp = client.get("/" + js.group(1)) if js else None
+    return index, css_resp, js_resp
+
+
 class TestWebServer(unittest.TestCase):
+    def test_health_endpoint(self):
+        # The desktop shell polls this before showing a window, so it must
+        # stay dependency-free and cheap (no Garmin network call).
+        resp = client.get("/api/health")
+        self.assertEqual(resp.status_code, 200)
+        data = resp.json()
+        self.assertIs(data["ok"], True)
+        self.assertEqual(data["app"], "lrf-ingestor")
+        self.assertRegex(data["version"], r"^\d+\.\d+\.\d+")
+
+    def test_config_endpoint_reports_default_destination(self):
+        resp = client.get("/api/config")
+        self.assertEqual(resp.status_code, 200)
+        data = resp.json()
+        self.assertIn("default_output_dir", data)
+        self.assertTrue(Path(data["default_output_dir"]).is_absolute())
+        self.assertIn("app_home", data)
+
     def test_auth_status_endpoint(self):
         resp = client.get("/api/auth/status")
         self.assertEqual(resp.status_code, 200)
@@ -22,40 +57,103 @@ class TestWebServer(unittest.TestCase):
         self.assertIn("authenticated", data)
 
     def test_static_index(self):
-        resp = client.get("/")
+        index, css, js = _built_assets()
+        resp = index
         self.assertEqual(resp.status_code, 200)
         self.assertIn("LETS", resp.text)
         self.assertIn("RUN", resp.text)
         self.assertIn("FASTER", resp.text)
-        self.assertIn("INGESTOR", resp.text)
-        self.assertIn("Bulk export garmin activities", resp.text)
-        self.assertIn("Delete All Export Files", resp.text)
-        # Logo icon removed - flat text logo only
+        self.assertIn("Ingestor", resp.text)
+        self.assertIn("Import activities", resp.text)
+        self.assertIn("Garmin account", resp.text)
+        self.assertIn("Delete files", resp.text)
+        # Flat text wordmark; icons come from the inline sprite, so the
+        # Font Awesome CDN is gone (offline-safe for the desktop shell).
         self.assertNotIn("fa-person-running", resp.text)
+        self.assertNotIn("font-awesome", resp.text)
+        self.assertNotIn('class="fa-', resp.text)
+        # The build has to be present: a missing bundle means somebody edited
+        # ui/ but forgot `npm run build` before committing.
+        self.assertIsNotNone(css, "index.html does not reference a built stylesheet")
+        self.assertIsNotNone(js, "index.html does not reference a built script")
+        self.assertEqual(css.status_code, 200)
+        self.assertEqual(js.status_code, 200)
+
+    def test_no_remote_assets_for_offline_desktop_app(self):
+        # Nothing may be fetched from the network: the packaged app has to
+        # render identically offline and behind a proxy.
+        index, css, js = _built_assets()
+        for blob in (index.text, css.text, js.text):
+            for host in ("cdn.tailwindcss.com", "fonts.googleapis.com", "fonts.gstatic.com", "cdnjs.cloudflare.com"):
+                self.assertNotIn(host, blob)
+
+    def test_self_hosted_fonts_are_bundled(self):
+        _, css, _ = _built_assets()
+        self.assertIn("@font-face", css.text)
+        self.assertIn("Plus Jakarta Sans Variable", css.text)
+        self.assertIn("Space Grotesk Variable", css.text)
+        self.assertIn("plus-jakarta-sans-latin-wght-normal.woff2", css.text)
+        self.assertIn("font-display:swap", css.text)
 
     def test_export_range_contrast_and_date_inputs(self):
-        # Issue #9: quick presets + unselected format buttons use the page
-        # background for contrast; date inputs use small text so the picker
-        # icon does not clip the value.
-        resp = client.get("/")
-        self.assertEqual(resp.status_code, 200)
-        self.assertIn("preset-btn px-2.5 py-1.5 bg-[#0b0e14]", resp.text)
-        self.assertNotIn("preset-btn px-2.5 py-1.5 bg-[#121722]", resp.text)
-        self.assertIn(
-            "parent.className = 'flex items-center space-x-2.5 bg-[#0b0e14]",
-            resp.text,
-        )
-        self.assertEqual(resp.text.count("text-white text-xs rounded-xl px-3 py-2.5"), 2)
+        # Issue #9: quick presets sit on the page background, the selected
+        # format card is expressed in CSS (:has) instead of rewritten by JS,
+        # and date inputs keep small text so the picker icon cannot clip.
+        index, css, _ = _built_assets()
+        self.assertEqual(index.status_code, 200)
+        self.assertIn("preset-btn", index.text)
+        self.assertIn('data-preset="week"', index.text)
+        self.assertIn("bg-[#0b0e14] p-1", index.text)  # preset track
+        self.assertNotIn("bg-[#121722]", index.text)
+        self.assertIn(".format-card:has(input:checked)", css.text)
+        self.assertEqual(index.text.count("font-mono text-[11px] text-slate-200 outline-none transition [color-scheme:dark]"), 2)
+        self.assertEqual(index.text.count("[color-scheme:dark]"), 2)
+
+    def test_hidden_sections_actually_hide(self):
+        # Tailwind's preflight does not reset [hidden], and an author
+        # `display: grid` utility beats the UA rule, so the stylesheet has to
+        # neutralize the attribute itself or toggled sections stay visible.
+        _, css, _ = _built_assets()
+        self.assertIn("[hidden]{display:none!important}", css.text)
+
+    def test_folder_picker_button_is_desktop_only(self):
+        index, _, js = _built_assets()
+        self.assertIn('id="btn-pick-folder"', index.text)
+        self.assertIn('id="i-folder-open"', index.text)
+        # The button is revealed by the platform shim only inside Electron.
+        self.assertIn('id="btn-pick-folder"', index.text)
+        self.assertIn("pickDirectory", js.text)
+        self.assertIn("lrfDesktop", js.text)
+
+    def test_no_browser_dialogs_for_desktop_shell(self):
+        # alert()/confirm() are browser chrome. The Electron renderer must
+        # use in-page feedback so the app never opens a stray browser dialog.
+        index, _, js = _built_assets()
+        for blob in (index.text, js.text):
+            self.assertNotIn("alert(", blob)
+            self.assertNotIn("window.confirm(", blob)
+        self.assertIn('id="toasts"', index.text)
+
+    def test_preferences_are_stored_by_the_engine(self):
+        # The desktop shell's origin (and its localStorage) changes every
+        # launch, so the push toggle and destination live in config.json.
+        index, _, js = _built_assets()
+        self.assertNotIn("localStorage", js.text)
+        self.assertIn("push_enabled", js.text)
+        self.assertIn("export_dir", js.text)
+        # Progress text is announced rather than only painted.
+        self.assertIn('id="progress-current-item" aria-live="polite"', index.text)
 
     def test_sync_new_rescans_latest_day(self):
         # Issue #9: sync-new must start at latest_date itself so a second
         # same-day activity is never skipped (duplicates are skipped
-        # server-side), falling back to suggested_start only when nothing
-        # is logged yet.
-        resp = client.get("/")
-        self.assertEqual(resp.status_code, 200)
-        self.assertIn("data.latest_date || data.suggested_start", resp.text)
-        self.assertNotIn("if (!data.suggested_start) throw", resp.text)
+        # server-side), falling back to suggested_start only when nothing is
+        # logged yet. Asserted against the built bundle: minification renames
+        # locals, so match the property accesses instead of the source text.
+        _, _, js = _built_assets()
+        bundle = js.text.replace(" ", "")
+        self.assertRegex(bundle, r"\.latest_date\|\|")
+        self.assertRegex(bundle, r"!\w+\.latest_date&&!\w+\.suggested_start")
 
     def test_clear_exports_endpoint_success(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -147,6 +245,42 @@ class TestRemoteSettings(unittest.TestCase):
         client.post("/api/settings/remote", json={"remote_url": "https://example.com/x"})
         _, key = app_settings.get_remote_settings()
         self.assertEqual(key, "lrf_keepme123456")
+
+    def test_preferences_roundtrip_through_config(self):
+        # push_enabled/export_dir live server-side: the desktop shell's origin
+        # (and thus localStorage) changes on every launch.
+        default = client.get("/api/settings/remote").json()
+        self.assertIs(default["push_enabled"], True)
+        self.assertIsNone(default["export_dir"])
+
+        resp = client.post(
+            "/api/settings/remote",
+            json={"push_enabled": False, "export_dir": "~/runs"},
+        )
+        self.assertEqual(resp.status_code, 200)
+        data = resp.json()
+        self.assertIs(data["push_enabled"], False)
+        self.assertEqual(data["export_dir"], str(Path.home() / "runs"))
+
+        reloaded = client.get("/api/settings/remote").json()
+        self.assertIs(reloaded["push_enabled"], False)
+        self.assertEqual(reloaded["export_dir"], str(Path.home() / "runs"))
+
+        # Stored absolute so the destination survives a different cwd.
+        stored = json.loads(Path(self.cfg_path).read_text())
+        self.assertTrue(Path(stored["export_dir"]).is_absolute())
+
+        # An empty export_dir clears the preference (back to the default).
+        client.post("/api/settings/remote", json={"export_dir": ""})
+        cleared = client.get("/api/settings/remote").json()
+        self.assertIsNone(cleared["export_dir"])
+        self.assertIs(cleared["push_enabled"], False)
+
+    def test_preferences_do_not_disturb_saved_key(self):
+        client.post("/api/settings/remote", json={"remote_api_key": "lrf_prefkey123456"})
+        client.post("/api/settings/remote", json={"push_enabled": False})
+        _, key = app_settings.get_remote_settings()
+        self.assertEqual(key, "lrf_prefkey123456")
 
     def test_resolve_latest_url(self):
         self.assertEqual(

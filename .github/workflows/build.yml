@@ -7,12 +7,41 @@ on:
   pull_request:
     paths:
       - "lrf-ingestor.spec"
-      - "garmin_engine/launcher.py"
       - "garmin_engine/**"
+      - "ui/**"
       - ".github/workflows/build.yml"
   workflow_dispatch:
 
 jobs:
+  ui:
+    # The built UI is committed (PyInstaller and `pip install` both consume
+    # garmin_engine/static with no Node step), so this job's real purpose is
+    # to fail when someone edits ui/ and forgets to rebuild.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+          cache-dependency-path: ui/package-lock.json
+
+      - name: Install UI dependencies
+        working-directory: ui
+        run: npm ci
+
+      - name: Build UI
+        working-directory: ui
+        run: npm run build
+
+      - name: Verify committed build is current
+        run: |
+          if ! git diff --exit-code -- garmin_engine/static; then
+            echo "::error::garmin_engine/static is stale. Run 'cd ui && npm run build' and commit the result."
+            exit 1
+          fi
+
   build:
     strategy:
       fail-fast: false
@@ -20,6 +49,12 @@ jobs:
         include:
           - os: windows-latest
             artifact: LrfIngestor.exe
+          # Native Windows on ARM build. Windows 11 ARM can emulate an x64
+          # binary, but that doubles first-launch extraction time, so ship a
+          # real arm64 engine for ARM machines.
+          - os: windows-11-arm
+            artifact: LrfIngestor-arm64.exe
+            python_arch: arm64
           - os: macos-latest
             artifact: LrfIngestor
           - os: ubuntu-latest
@@ -28,9 +63,32 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: actions/setup-python@v5
+      # windows-11-arm ships both x64 and arm64 Pythons; name the architecture
+      # explicitly or the x64 interpreter wins and PyInstaller emits an x64 exe.
+      - name: Set up Python (runner architecture)
+        if: ${{ !matrix.python_arch }}
+        uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+
+      - name: Set up Python (explicit architecture)
+        if: ${{ matrix.python_arch }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          architecture: ${{ matrix.python_arch }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+          cache-dependency-path: ui/package-lock.json
+
+      - name: Build UI
+        working-directory: ui
+        run: |
+          npm ci
+          npm run build
 
       - name: Install dependencies
         run: |
@@ -38,11 +96,37 @@ jobs:
           pip install -e .
           pip install pyinstaller
 
-      - name: Smoke-test (unit tests)
-        run: python -m unittest discover tests
+      - name: Smoke-test (unit tests + engine handshake)
+        run: |
+          python -m unittest discover tests
+          python -c "from garmin_engine.launcher import ready_line; print(ready_line('http://127.0.0.1:1', 1))"
 
       - name: Build one-file binary
         run: pyinstaller lrf-ingestor.spec
+
+      - name: Verify frozen binary starts and reports its port
+        shell: bash
+        run: |
+          cd dist
+          BIN=./LrfIngestor
+          [ -f "$BIN.exe" ] && BIN="$BIN.exe"
+          chmod +x "$BIN" 2>/dev/null || true
+          "$BIN" ui --no-browser --port 0 > /tmp/engine.log 2>&1 &
+          ENGINE_PID=$!
+          for _ in $(seq 1 30); do
+            grep -q '^LRF_READY ' /tmp/engine.log && break
+            sleep 1
+          done
+          cat /tmp/engine.log
+          grep -q '^LRF_READY ' /tmp/engine.log || { echo "engine never reported ready"; kill $ENGINE_PID; exit 1; }
+          URL=$(grep -o 'url=[^ ]*' /tmp/engine.log | head -1 | cut -d= -f2)
+          curl -fsS "$URL/api/health" | grep -q '"ok":true' || { echo "health check failed"; kill $ENGINE_PID; exit 1; }
+          kill $ENGINE_PID 2>/dev/null || true
+
+      - name: Rename Windows ARM binary
+        if: runner.os == 'Windows' && runner.arch == 'ARM64'
+        shell: pwsh
+        run: Rename-Item dist/LrfIngestor.exe LrfIngestor-arm64.exe
 
       - name: Rename macOS binary per arch
         if: runner.os == 'macOS'
@@ -60,7 +144,8 @@ jobs:
       - name: Upload binary artifact
         uses: actions/upload-artifact@v4
         with:
-          name: LrfIngestor-${{ runner.os }}
+          # Two Windows jobs run in parallel, so the label must be unique.
+          name: LrfIngestor-${{ matrix.os }}
           path: dist/*
           if-no-files-found: error
 
@@ -74,6 +159,15 @@ jobs:
       - uses: actions/download-artifact@v4
         with:
           path: binaries
+      - name: Generate checksums
+        # The desktop shell verifies SHA256SUMS.txt before running the engine
+        # it just downloaded, so a corrupted or swapped artifact fails closed.
+        run: |
+          cd binaries
+          find . -type f -exec sha256sum {} \; \
+            | sed 's#  .*/#  #' \
+            | sort -k2 > SHA256SUMS.txt
+          cat SHA256SUMS.txt
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
         with:

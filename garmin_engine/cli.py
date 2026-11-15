@@ -10,12 +10,33 @@ from rich.table import Table
 
 from .auth import GarminAuthManager, AuthStatus
 from .exporter import GarminExporter, ExportFormat
+from .version import get_version
 from . import settings as app_settings
 
 app = typer.Typer(
     help="Garmin Ingestor: Bulk export activities (FIT/GPX) to local disk or remote API."
 )
 console = Console()
+
+
+def _version_callback(value: bool) -> None:
+    if value:
+        console.print(f"LetsRunFaster Ingestor {get_version()}")
+        raise typer.Exit()
+
+
+@app.callback()
+def _app_meta(
+    version: bool = typer.Option(
+        False,
+        "--version",
+        "-V",
+        callback=_version_callback,
+        is_eager=True,
+        help="Show the installed version and exit.",
+    ),
+) -> None:
+    """Bulk export Garmin Connect activities to disk or the LetsRunFaster site."""
 
 
 @app.command()
@@ -229,21 +250,20 @@ def export(
 @app.command()
 def ui(
     host: str = typer.Option("127.0.0.1", "--host", "-h", help="Host address to bind to"),
-    port: int = typer.Option(8000, "--port", "-p", help="Port number"),
+    port: int = typer.Option(8000, "--port", "-p", help="Port number (0 picks a free port)"),
     open_browser: bool = typer.Option(True, "--open/--no-open", help="Automatically open browser"),
+    no_browser: bool = typer.Option(
+        False, "--no-browser", hidden=True, help="Alias for --no-open"
+    ),
 ):
-    """Launch the interactive browser UI for Garmin Ingestor."""
-    import webbrowser
-    import uvicorn
-    # Import the app object directly (rather than "garmin_engine.web_server:app"
-    # string) so this also works inside a PyInstaller-frozen binary, where
-    # uvicorn's string-based import + auto-reload machinery is unavailable.
-    from .web_server import app as web_app
-    url = f"http://{host}:{port}"
-    console.print(f"[bold green]Starting Garmin Ingestor UI at:[/bold green] [cyan underline]{url}[/cyan underline]")
-    if open_browser:
-        webbrowser.open(url)
-    uvicorn.run(web_app, host=host, port=port, log_level="info")
+    """Launch the interactive web UI for Garmin Ingestor."""
+    # Shared with the double-click launcher so both print the LRF_READY
+    # handshake (the desktop shell needs the resolved port) and so neither
+    # depends on uvicorn's string-based import machinery, which is
+    # unavailable inside a PyInstaller-frozen binary.
+    from .launcher import run_ui
+
+    run_ui(host=host, port=port, open_browser=open_browser and not no_browser)
 
 
 if __name__ == "__main__":

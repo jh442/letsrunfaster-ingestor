@@ -8,6 +8,8 @@ from typing import Any, Optional
 import garminconnect
 from garminconnect import Garmin, GarminConnectAuthenticationError
 
+from . import paths
+
 
 class AuthStatus(str, Enum):
     AUTHENTICATED = "AUTHENTICATED"
@@ -28,8 +30,7 @@ class GarminAuthManager:
 
     def __init__(self, token_dir: Optional[Path] = None):
         if token_dir is None:
-            home = Path.home()
-            self.token_dir = home / ".garmin-ingestor" / "tokens"
+            self.token_dir = paths.token_dir()
         else:
             self.token_dir = Path(token_dir)
         self.token_dir.mkdir(parents=True, exist_ok=True)
