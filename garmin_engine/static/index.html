@@ -251,7 +251,7 @@
               </span>
               <span class="min-w-0 flex-1">
                 <span class="block text-[12px] font-semibold text-slate-200">Push to LetsRunFaster</span>
-                <span class="block text-[10px] text-slate-400">Append each activity to its block day</span>
+                <span class="block text-[10px] text-slate-400">Block day or standalone run — your choice</span>
               </span>
               <span id="push-state-chip" class="shrink-0 rounded-full bg-white/[0.04] px-2 py-0.5 text-[9px] font-bold uppercase tracking-[0.1em] text-slate-400">Off</span>
               <svg id="remote-chevron" class="icon shrink-0 text-[13px] text-slate-400 transition-transform" aria-hidden="true"><use href="#i-chevron-down"></use></svg>
@@ -261,6 +261,27 @@
               <label class="flex cursor-pointer items-center justify-between gap-3 rounded-xl bg-[#0d121d] px-3 py-2.5">
                 <span class="text-[11px] font-semibold text-slate-300">Also push during export</span>
                 <input id="push-enabled" type="checkbox" checked class="peer sr-only">
+                <span class="relative h-5 w-9 shrink-0 rounded-full bg-slate-700 transition peer-checked:bg-orange-500 after:absolute after:left-0.5 after:top-0.5 after:h-4 after:w-4 after:rounded-full after:bg-white after:transition after:content-[''] peer-checked:after:translate-x-4"></span>
+              </label>
+              <div>
+                <span class="micro mb-1 block text-[9px] text-slate-400">Runs outside a block</span>
+                <div id="remote-mode-group" role="group" aria-label="Import mode for runs outside a block"
+                  class="grid grid-cols-3 gap-1 rounded-xl bg-[#0b0e14] p-1">
+                  <button type="button" data-mode="block" aria-pressed="false"
+                    class="mode-btn rounded-lg px-1.5 py-1.5 text-[10px] font-bold uppercase tracking-[0.04em] transition text-slate-400 hover:text-slate-200">Block only</button>
+                  <button type="button" data-mode="auto" aria-pressed="false"
+                    class="mode-btn rounded-lg px-1.5 py-1.5 text-[10px] font-bold uppercase tracking-[0.04em] transition text-slate-400 hover:text-slate-200">Auto</button>
+                  <button type="button" data-mode="activity" aria-pressed="false"
+                    class="mode-btn rounded-lg px-1.5 py-1.5 text-[10px] font-bold uppercase tracking-[0.04em] transition text-slate-400 hover:text-slate-200">Always run</button>
+                </div>
+                <p id="remote-mode-copy" class="mt-1.5 text-[10px] leading-relaxed text-slate-400"></p>
+              </div>
+              <label class="flex cursor-pointer items-center justify-between gap-3 rounded-xl bg-[#0d121d] px-3 py-2.5">
+                <span class="min-w-0">
+                  <span class="block text-[11px] font-semibold text-slate-300">Import runs as private</span>
+                  <span class="block text-[10px] leading-relaxed text-slate-400">Profile and history only — no public feed or leaderboard.</span>
+                </span>
+                <input id="private-import" type="checkbox" class="peer sr-only">
                 <span class="relative h-5 w-9 shrink-0 rounded-full bg-slate-700 transition peer-checked:bg-orange-500 after:absolute after:left-0.5 after:top-0.5 after:h-4 after:w-4 after:rounded-full after:bg-white after:transition after:content-[''] peer-checked:after:translate-x-4"></span>
               </label>
               <div>

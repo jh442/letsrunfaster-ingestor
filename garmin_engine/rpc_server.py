@@ -127,15 +127,27 @@ def run_rpc_server():
                 remote_api_key = params.get("remoteApiKey")
                 # Omitted push fields fall back to saved settings; explicit ""
                 # disables pushing (same contract as the web UI endpoint).
-                saved_url, saved_key = app_settings.get_remote_settings()
+                saved = app_settings.get_push_settings()
                 if remote_url is None:
-                    remote_url = saved_url
+                    remote_url = saved["remote_url"]
                 elif not str(remote_url).strip():
                     remote_url = None
                 if remote_api_key is None:
-                    remote_api_key = saved_key
+                    remote_api_key = saved["remote_api_key"]
                 elif not str(remote_api_key).strip():
                     remote_api_key = None
+                remote_mode = params.get("remoteMode")
+                if remote_mode is None:
+                    remote_mode = saved["remote_mode"]
+                else:
+                    remote_mode = app_settings.normalize_remote_mode(remote_mode)
+                    if remote_mode is None:
+                        remote_mode = saved["remote_mode"]
+                import_private = params.get("importPrivate")
+                if import_private is None:
+                    import_private = saved["import_private"]
+                else:
+                    import_private = bool(import_private)
                 activity_type = params.get("activityType")
                 delay = float(params.get("delay", 0.5))
 
@@ -157,7 +169,15 @@ def run_rpc_server():
                         "sizeBytes": res.size_bytes,
                         "savedPath": res.saved_path,
                         "remoteSynced": res.remote_synced,
+                        "remoteMatched": res.remote_matched,
+                        "remoteDetail": res.remote_detail,
                         "remoteConvertedPlan": res.remote_converted_plan,
+                        "remoteLinkage": res.remote_linkage,
+                        "remoteCreated": res.remote_created,
+                        "remoteDeleted": res.remote_deleted,
+                        "remoteSocialActivityId": res.remote_social_activity_id,
+                        "remoteActivityUrl": res.remote_activity_url,
+                        "importPrivate": import_private,
                         "error": res.error_message,
                     })
 
@@ -169,6 +189,8 @@ def run_rpc_server():
                     remote_api_key=remote_api_key,
                     delay_seconds=delay,
                     progress_callback=on_progress,
+                    remote_mode=remote_mode,
+                    import_private=import_private,
                 )
 
                 send_response(req_id, {
@@ -185,6 +207,8 @@ def run_rpc_server():
                     remote_url=params.get("remoteUrl"),
                     remote_api_key=params.get("remoteApiKey"),
                     clear_key=bool(params.get("clearKey", False)),
+                    remote_mode=params.get("remoteMode"),
+                    import_private=params.get("importPrivate"),
                 )
                 send_response(req_id, {"success": True, **saved})
 

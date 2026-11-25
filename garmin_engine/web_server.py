@@ -71,6 +71,11 @@ class ExportRequest(BaseModel):
     output_dir: Optional[str] = None
     remote_url: Optional[str] = None
     remote_api_key: Optional[str] = None
+    # None => saved config. `block` only attaches to block days, `auto` posts
+    # unmatched runs, `activity` always posts a run.
+    remote_mode: Optional[str] = None
+    # None => saved config; True sends is_private=1 for non-block runs.
+    import_private: Optional[bool] = None
     activity_type: Optional[str] = None
     delay: float = 0.5
 
@@ -167,22 +172,33 @@ def list_activities(payload: ListActivitiesRequest):
 @app.post("/api/activities/export")
 async def start_export(payload: ExportRequest):
     try:
-        saved_url, saved_key = app_settings.get_remote_settings()
+        saved = app_settings.get_push_settings()
         # Push-target contract: omitted (None) falls back to saved settings,
         # explicit "" disables pushing (the UI sends "" when its push
         # checkbox is off, so "locally only" keeps working).
         if payload.remote_url is None:
-            remote_url: Optional[str] = saved_url
+            remote_url: Optional[str] = saved["remote_url"]
         elif payload.remote_url.strip() == "":
             remote_url = None
         else:
             remote_url = payload.remote_url.strip()
         if payload.remote_api_key is None:
-            remote_api_key: Optional[str] = saved_key
+            remote_api_key: Optional[str] = saved["remote_api_key"]
         elif payload.remote_api_key.strip() == "":
             remote_api_key = None
         else:
             remote_api_key = payload.remote_api_key.strip()
+        try:
+            remote_mode = app_settings.normalize_remote_mode(payload.remote_mode)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
+        if remote_mode is None:
+            remote_mode = saved["remote_mode"]
+        import_private = (
+            saved["import_private"]
+            if payload.import_private is None
+            else bool(payload.import_private)
+        )
         client = active_client or auth_mgr.get_client()
         client.login(tokenstore=auth_mgr.token_store)
         exporter = GarminExporter(client)
@@ -217,6 +233,8 @@ async def start_export(payload: ExportRequest):
                 output_dir=dest_dir,
                 remote_url=remote_url,
                 remote_api_key=remote_api_key,
+                remote_mode=remote_mode,
+                import_private=import_private,
             )
 
         for idx, act in enumerate(activities, start=1):
@@ -236,6 +254,12 @@ async def start_export(payload: ExportRequest):
                     "remoteMatched": res.remote_matched,
                     "remoteDetail": res.remote_detail,
                     "remoteConvertedPlan": res.remote_converted_plan,
+                    "remoteLinkage": res.remote_linkage,
+                    "remoteCreated": res.remote_created,
+                    "remoteDeleted": res.remote_deleted,
+                    "remoteSocialActivityId": res.remote_social_activity_id,
+                    "remoteActivityUrl": res.remote_activity_url,
+                    "importPrivate": import_private,
                     "error": res.error_message,
                 },
             )
@@ -246,6 +270,20 @@ async def start_export(payload: ExportRequest):
             "total": total,
             "succeeded": sum(1 for r in results if r.success),
             "failed": sum(1 for r in results if not r.success),
+            # Block vs run vs no-op, so the completion toast can say what was
+            # actually stored instead of only how many files downloaded.
+            "blockDays": sum(
+                1 for r in results
+                if r.remote_synced and r.remote_linkage == "block"
+                and r.remote_detail not in ("duplicate", "deleted")
+            ),
+            "runs": sum(
+                1 for r in results
+                if r.remote_synced and r.remote_linkage == "nonblock"
+                and r.remote_detail == "run"
+            ),
+            "duplicates": sum(1 for r in results if r.remote_synced and r.remote_detail == "duplicate"),
+            "deleted": sum(1 for r in results if r.remote_synced and r.remote_detail == "deleted"),
         }
         await broadcast_event("export_completed", summary)
         return summary
@@ -264,6 +302,8 @@ class RemoteSettingsRequest(BaseModel):
     clear_key: bool = False
     push_enabled: Optional[bool] = None
     export_dir: Optional[str] = None
+    remote_mode: Optional[str] = None
+    import_private: Optional[bool] = None
 
 
 class SyncLatestRequest(BaseModel):
@@ -284,12 +324,18 @@ def save_remote_settings(payload: RemoteSettingsRequest):
         raise HTTPException(status_code=400, detail="Remote URL cannot be empty.")
     if payload.remote_api_key is not None and payload.clear_key:
         raise HTTPException(status_code=400, detail="Pass either remote_api_key or clear_key, not both.")
+    try:
+        app_settings.normalize_remote_mode(payload.remote_mode)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
     saved = app_settings.save_config(
         remote_url=payload.remote_url,
         remote_api_key=payload.remote_api_key,
         clear_key=payload.clear_key,
         push_enabled=payload.push_enabled,
         export_dir=payload.export_dir,
+        remote_mode=payload.remote_mode,
+        import_private=payload.import_private,
     )
     return {"success": True, **saved}
 

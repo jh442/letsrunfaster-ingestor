@@ -19,6 +19,8 @@ const state = {
   activities: [],
   distanceUnit: 'mi',
   hasKey: false,
+  remoteMode: 'auto',
+  importPrivate: false,
 };
 
 /* ------------------------------------------------------------------ *
@@ -102,17 +104,24 @@ function connectSocket() {
     } else if (message.event === 'export_progress') {
       const { current, total, filename, success, error } = message.data;
       updateProgress(current, total, success ? `Saved ${filename}` : `Failed: ${error || 'unknown error'}`);
-      markActivityStatus(message.data.activityId, success, message.data.remoteMatched, message.data.remoteDetail, message.data.remoteConvertedPlan);
+      markActivityStatus(message.data);
     } else if (message.event === 'export_completed') {
-      const { total, succeeded, failed } = message.data;
+      const { total, succeeded, failed, blockDays, runs, duplicates, deleted } = message.data;
       setBusy($('btn-start-export'), false);
       $('progress-status-title').textContent = failed ? 'Export finished with errors' : 'Export complete';
-      updateProgress(total, total, `${succeeded} of ${total} activities exported`);
+
+      const parts = [];
+      if (blockDays) parts.push(`${blockDays} block ${blockDays === 1 ? 'day' : 'days'}`);
+      if (runs) parts.push(`${runs} ${runs === 1 ? 'run' : 'runs'} posted`);
+      if (duplicates) parts.push(`${duplicates} duplicate${duplicates === 1 ? '' : 's'}`);
+      if (deleted) parts.push(`${deleted} deleted on site`);
+      const detail = parts.length ? ` · ${parts.join(' · ')}` : '';
+      updateProgress(total, total, `${succeeded} of ${total} activities exported${detail}`);
       setProgressSpinner('complete');
       notify(
         failed
-          ? `${failed} of ${total} activities failed. ${succeeded} exported.`
-          : `${total} ${total === 1 ? 'activity' : 'activities'} exported.`,
+          ? `${failed} of ${total} activities failed. ${succeeded} exported${detail}.`
+          : `${total} ${total === 1 ? 'activity' : 'activities'} exported${detail}.`,
         failed ? 'error' : 'success'
       );
     }
@@ -238,6 +247,47 @@ document.querySelectorAll('.unit-btn').forEach((btn) => {
 
 const remoteKeyEl = $('remote-key');
 const pushEnabledEl = $('push-enabled');
+const privateImportEl = $('private-import');
+
+const MODE_COPY = {
+  block: 'Only block days are imported. A run with no block for its date is skipped.',
+  auto: 'A block day when the date matches; otherwise a standalone run on your feed.',
+  activity: 'Always a standalone run. Existing block days are left alone.',
+};
+
+/** Paint the three-way mode control and its one-line explanation. */
+function setRemoteModeUI(mode, { legacyDefault = false } = {}) {
+  state.remoteMode = MODE_COPY[mode] ? mode : 'auto';
+  document.querySelectorAll('.mode-btn').forEach((btn) => {
+    const active = btn.dataset.mode === state.remoteMode;
+    btn.setAttribute('aria-pressed', String(active));
+    btn.className = `mode-btn rounded-lg px-1.5 py-1.5 text-[10px] font-bold uppercase tracking-[0.04em] transition ${
+      active ? 'bg-orange-500/15 text-orange-300' : 'text-slate-400 hover:text-slate-200'
+    }`;
+  });
+  let copy = MODE_COPY[state.remoteMode];
+  if (legacyDefault) {
+    copy += ' Existing setup kept on Block only — choose Auto or Always run to post runs outside blocks.';
+  }
+  $('remote-mode-copy').textContent = copy;
+}
+
+document.querySelectorAll('.mode-btn').forEach((btn) => {
+  btn.addEventListener('click', () => {
+    const mode = btn.dataset.mode;
+    if (!MODE_COPY[mode] || mode === state.remoteMode) return;
+    setRemoteModeUI(mode);
+    savePreference({ remote_mode: mode }, 'Could not save the import mode.');
+  });
+});
+
+privateImportEl.addEventListener('change', () => {
+  state.importPrivate = privateImportEl.checked;
+  savePreference(
+    { import_private: privateImportEl.checked },
+    'Could not save the private-import setting.',
+  );
+});
 
 function setSaveStatus(message, ok) {
   const el = $('remote-save-status');
@@ -323,6 +373,12 @@ async function loadRemoteSettings() {
   state.hasKey = Boolean(server && server.has_key);
   if (server) {
     pushEnabledEl.checked = Boolean(server.push_enabled);
+    const mode = server.remote_mode || 'auto';
+    setRemoteModeUI(mode, {
+      legacyDefault: mode === 'block' && !server.remote_mode_explicit,
+    });
+    state.importPrivate = Boolean(server.import_private);
+    privateImportEl.checked = state.importPrivate;
     if (server.export_dir) {
       outputDirEl.value = server.export_dir;
       savedExportDir = server.export_dir;
@@ -631,34 +687,88 @@ async function loadActivities() {
 
 $('btn-fetch-activities').addEventListener('click', loadActivities);
 
-function markActivityStatus(id, success, remoteMatched, remoteDetail, remoteConvertedPlan) {
-  const cell = document.getElementById(`status-${id}`);
+function markActivityStatus(data) {
+  const cell = document.getElementById(`status-${data.activityId}`);
   if (!cell) return;
 
-  if (!success) {
+  if (!data.success) {
     cell.innerHTML = `<span class="inline-flex items-center gap-1 rounded-md bg-rose-500/10 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-[0.06em] text-rose-400">${icon('x', 'text-[10px]')}Failed</span>`;
     return;
   }
 
-  let detail = '';
-  if (remoteDetail === 'duplicate') {
-    detail = `<div class="mt-1 text-[10px] font-medium text-slate-400">Duplicate skipped</div>`;
-  } else if (remoteConvertedPlan) {
-    detail = `<div class="mt-1 text-[10px] font-medium text-emerald-400">Plan logged (${escapeHtml(remoteDetail || 'primary')})</div>`;
-  } else if (remoteDetail && String(remoteDetail).startsWith('updated')) {
-    detail = `<div class="mt-1 text-[10px] font-medium text-sky-400">Already logged, refreshed</div>`;
-  } else if (remoteMatched === true) {
-    detail = `<div class="mt-1 text-[10px] font-medium text-emerald-400">Block day (${escapeHtml(remoteDetail || 'added')})</div>`;
-  } else if (remoteMatched === false) {
-    detail = `<div class="mt-1 text-[10px] font-medium text-amber-400">No block for date</div>`;
+  // `linkage` is absent on older servers; the engine maps those to "block",
+  // so the existing branches below still apply. The non-block branch must run
+  // before `remoteMatched === false`, because a stored run reports matched:false.
+  let note = '';
+
+  if (data.remoteDeleted) {
+    note = `<div class="mt-1 text-[10px] font-medium text-slate-400">Deleted on the site — not re-imported</div>`;
+  } else if (data.remoteDetail === 'duplicate') {
+    note = `<div class="mt-1 text-[10px] font-medium text-slate-400">Duplicate skipped</div>`;
+  } else if (data.remoteLinkage === 'nonblock' && data.remoteCreated) {
+    const label = data.importPrivate ? 'Run logged (private)' : 'Run logged';
+    const link = data.remoteActivityUrl
+      ? ` <a href="${escapeHtml(data.remoteActivityUrl)}" target="_blank" rel="noreferrer" class="underline decoration-emerald-400/40 underline-offset-2 hover:text-emerald-300">View ↗</a>`
+      : '';
+    note = `<div class="mt-1 text-[10px] font-medium text-emerald-400">${label}${link}</div>`;
+  } else if (data.remoteConvertedPlan) {
+    note = `<div class="mt-1 text-[10px] font-medium text-emerald-400">Plan logged (${escapeHtml(data.remoteDetail || 'primary')})</div>`;
+  } else if (data.remoteDetail && String(data.remoteDetail).startsWith('updated')) {
+    note = `<div class="mt-1 text-[10px] font-medium text-sky-400">Already logged, refreshed</div>`;
+  } else if (data.remoteMatched === true) {
+    note = `<div class="mt-1 text-[10px] font-medium text-emerald-400">Block day (${escapeHtml(data.remoteDetail || 'added')})</div>`;
+  } else if (data.remoteMatched === false && data.remoteLinkage !== 'nonblock') {
+    note = `<div class="mt-1 text-[10px] font-medium text-amber-400">No block for date</div>`;
   }
 
-  cell.innerHTML = `<span class="inline-flex items-center gap-1 rounded-md bg-emerald-500/10 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-[0.06em] text-emerald-400">${icon('check', 'text-[10px]')}Exported</span>${detail}`;
+  cell.innerHTML = `<span class="inline-flex items-center gap-1 rounded-md bg-emerald-500/10 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-[0.06em] text-emerald-400">${icon('check', 'text-[10px]')}Exported</span>${note}`;
 }
 
 /* ------------------------------------------------------------------ *
  * Export
  * ------------------------------------------------------------------ */
+
+const BULK_WARNING_DAYS = 31;
+let bulkArmed = false;
+let bulkArmedKey = null;
+let bulkTimer = null;
+
+function rangeDays(start, end) {
+  return Math.round((new Date(`${end}T00:00:00`) - new Date(`${start}T00:00:00`)) / 86400000) + 1;
+}
+
+/**
+ * Auto/always-run modes can turn a historical backfill into a wall of feed
+ * posts. Ask once (second click) on ranges over a month, and point at the
+ * private toggle. Block-only mode never needs the warning.
+ */
+function confirmBulkPosting(start, end) {
+  if (!pushEnabledEl.checked || state.remoteMode === 'block') return true;
+  const days = rangeDays(start, end);
+  if (days <= BULK_WARNING_DAYS) return true;
+  // Confirming is tied to the exact range/mode/visibility that was warned
+  // about: changing any of them before the second click warns again.
+  const key = `${start}|${end}|${state.remoteMode}|${state.importPrivate}`;
+  if (bulkArmed && bulkArmedKey === key) {
+    bulkArmed = false;
+    bulkArmedKey = null;
+    clearTimeout(bulkTimer);
+    return true;
+  }
+  bulkArmed = true;
+  bulkArmedKey = key;
+  const consequence = state.remoteMode === 'activity'
+    ? 'every activity becomes a standalone run'
+    : 'every date without a block becomes a run';
+  const visibility = state.importPrivate ? 'private' : 'public';
+  notify(
+    `Bulk import (${days} days) in ${state.remoteMode} mode: ${consequence} (${visibility}). `
+      + 'Click Export again to confirm, or turn on "Import runs as private" first.',
+    'info',
+  );
+  bulkTimer = setTimeout(() => { bulkArmed = false; bulkArmedKey = null; }, 8000);
+  return false;
+}
 
 $('btn-start-export').addEventListener('click', async () => {
   if (!state.authenticated) return notify('Connect your Garmin account first.', 'error');
@@ -667,6 +777,7 @@ $('btn-start-export').addEventListener('click', async () => {
   const end = $('end-date').value;
   if (!start || !end) return notify('Choose a start and end date.', 'error');
   if (start > end) return notify('The start date is after the end date.', 'error');
+  if (!confirmBulkPosting(start, end)) return;
 
   const format = document.querySelector('input[name="format"]:checked').value;
   const pushEnabled = $('push-enabled').checked;
@@ -692,6 +803,8 @@ $('btn-start-export').addEventListener('click', async () => {
         output_dir: $('output-dir').value,
         remote_url: remoteUrl,
         remote_api_key: remoteApiKey,
+        remote_mode: state.remoteMode,
+        import_private: state.importPrivate,
       }),
     });
     const data = await res.json();
@@ -856,6 +969,7 @@ document.addEventListener('keydown', (event) => {
 
 setDateRange(30);
 markPreset('30d');
+setRemoteModeUI('auto');
 refreshPushChip();
 loadRuntimeConfig();
 loadRemoteSettings();

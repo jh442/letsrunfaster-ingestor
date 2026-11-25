@@ -163,18 +163,62 @@ each launch, which changes the page origin.
 
 ```bash
 garmin-ingestor configure --remote-url https://www.letsrunfaster.com/api/activities/import --remote-key "lrf_..."
-garmin-ingestor configure --show        # URL + key prefix (never the secret)
+garmin-ingestor configure --show        # URL, key prefix, mode, visibility
 garmin-ingestor export --start 2025-06-01 --end 2025-07-01 --format fit   # pushes via saved target
 ```
+
+`configure --show` prints the mode, never the secret:
+
+```
+Target URL: https://www.letsrunfaster.com/api/activities/import
+API key: saved (lrf_abcdef12...)
+Import mode: auto (block day when the date matches, otherwise a run on your feed)
+Runs outside a block: public
+```
+
+### Runs outside a training block
+
+Garmin activities that do not line up with a block day can be stored as
+standalone runs instead of being rejected. Pick how with `remote_mode`:
+
+| Mode | A run whose date matches a block day | A run with no block |
+| --- | --- | --- |
+| `block` | Appended/refreshed on the block day (legacy behavior) | Skipped (`no_block_found`) |
+| `auto` (fresh default) | Appended/refreshed on the block day | Saved as a standalone run on the feed |
+| `activity` | Saved as a standalone run; the block day is left alone | Saved as a standalone run |
+
+```bash
+garmin-ingestor configure --remote-mode auto            # or block / activity
+garmin-ingestor configure --private                     # runs outside a block are private
+garmin-ingestor export --start 2026-09-01 --end 2026-09-30 --remote-mode activity
+```
+
+- **Upgrade safety:** a `config.json` written before modes existed keeps
+  `block` until you opt in, so updating the ingestor never starts publishing
+  unmatched runs. A fresh install starts on `auto`. The resolved value is
+  frozen into `config.json` on the first write.
+- **Private runs:** `--private` sends `is_private=1`; those runs appear on your
+  profile/history but not the public feed, leaderboard, or OG cards. The
+  block-day path ignores the flag (it is a planned block workout).
+- **Per-run override:** `--remote-mode` / `--private|--public` on `export`
+  override the saved choice for that run only.
+- Identity dedupe still applies: the same Garmin activity id never produces a
+  second row, whichever mode created it.
+
+The browser/desktop UI exposes the same three-way choice under **Push to
+LetsRunFaster → Runs outside a block**, plus an **Import runs as private**
+toggle. Bulk exports over a month in `auto`/`activity` mode ask for a second
+confirm click, because every date without a block (or every date, in
+`activity` mode) becomes a feed post.
 
 ### Sync New Since Last Import
 
 In the browser UI, **Sync new since last import** asks the site (via
 `GET /api/activities/latest`, Bearer-key authed, proxied through the ingestor
-backend) for your latest logged block day and sets the range to
+backend) for your latest logged day and sets the range to
 `latest + 1 day … today`, then previews the Garmin activities — press
-**Export Now** to import them. The lookup counts any actual day (hand-logged
-or Garmin-pushed).
+**Export Now** to import them. The lookup counts both block days and
+standalone runs (hand-logged or Garmin-pushed).
 
 ## Remote Ingestion API Specification
 
@@ -182,24 +226,49 @@ When `--remote-url` is specified, `garmin-ingestor` will send a `multipart/form-
 
 - **Headers**: `Authorization: Bearer <remote-key>` (`lrf_...` from your profile page)
 - **Form fields**:
-  - `activity_id`: Garmin numeric activity ID (string)
+  - `activity_id`: Garmin numeric activity ID (string) — **not** the site row id
   - `activity_name`: Name of the activity
   - `activity_type`: E.g., `running`, `cycling`, `swimming`
   - `start_time`: Local start timestamp (e.g. `2025-03-01 07:15:00`)
   - `format`: `fit`, `gpx` or `tcx`
+  - `mode` (optional): `block` | `auto` | `activity`; absent = legacy `block`.
+    **Must be a form field, never a query parameter** — the ingestor derives
+    `/activities/latest` by suffix-matching the saved import URL.
+  - `is_private` (optional): `1` makes a run created outside a block private;
+    omit it to use the server's public default. Ignored for block-day imports.
   - Parsed FIT payload (FIT exports only, mirrors the site's ParsedGpxResult):
     `distance_miles`, `avg_pace`, `avg_hr`, `max_hr`, `avg_cadence`,
     `elev_gain_ft`, `finish_time`, `device`, `telemetry_json`
     (downsampled to fit the site's 500KB cap)
 - **File**:
   - `file`: The binary payload of the activity file (`.fit`, `.gpx` or `.tcx`)
-- **Response** (always HTTP 200 on valid key):
-  - `{ ok:true, matched:true, block_id, day_id, appended_to }` — appended to the
-    training-block day (never replaces a *different* activity; fills primary, else second, else extra)
-  - `{ ok:true, matched:true, replaced:true, slot }` — same activity already on the
-    day (distance ±0.05mi, HR ±2, duration ±30s): refreshed in place, no duplicate row
-  - `{ ok:true, matched:false, code:"no_block_found", activity_date }` — no block
-    covers that date; export again after creating one
+- **Block response** (HTTP 200 on valid key):
+  - `{ ok:true, matched:true, linkage:"block", block_id, day_id, appended_to }`
+    — appended to the training-block day (never replaces a *different*
+    activity; fills primary, else second, else extra)
+  - `{ ok:true, matched:true, linkage:"block", replaced:true, slot }` — same
+    activity already on the day (distance ±0.05mi, HR ±2, duration ±30s):
+    refreshed in place, no duplicate row
+  - `{ ok:true, matched:false, code:"no_block_found", activity_date }` — no
+    block covers that date and the request used `mode=block` (or an old
+    server ignored `mode`)
+- **Standalone-run response** (`mode=auto|activity`, no block match):
+  - `{ ok:true, matched:false, linkage:"nonblock", created:true,
+    social_activity_id, activity_id, activity_date, url:"/activity/<id>" }`
+    — a new row in the unified activity store
+  - `{ ok:true, linkage:"nonblock", created:false, deduped:true,
+    social_activity_id, url }` — this Garmin id already exists
+  - `{ ok:true, linkage:"nonblock", deduped:true, deleted:true, … }` — the
+    owner deleted that row on the site; re-pushing does **not** resurrect it
+  - `social_activity_id` is the site row id (`/activity/<id>`); `activity_id`
+    remains the Garmin id used for dedupe.
+- `linkage` is absent only on an older server. Treat missing as `block`, and
+  never infer "standalone run" from `matched:false` alone.
+
+**Deploy order:** server first, ingestor second. A new ingestor against an old
+server behaves exactly like today (the server ignores `mode`); an old ingestor
+against the new server still gets block-only behavior because it sends no
+`mode`.
 
 ## Developing the UI
 
