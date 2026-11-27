@@ -7,6 +7,21 @@ pair in ``config.json`` inside the app state directory (``LRF_INGESTOR_HOME``
 or ``~/.garmin-ingestor``; file mode 0600 because the API key is a bearer
 secret) so the web UI, CLI, and RPC server all default to it.
 
+It also owns the two import choices added with non-block pushes:
+
+``remote_mode``
+    ``block``    only attach runs to a matching training-block day;
+    ``auto``     a block day when the date matches, otherwise a standalone run;
+    ``activity`` always a standalone run (existing block days stay untouched).
+    A fresh install starts on ``auto`` because that is the feature's point,
+    while a config saved before modes existed keeps the old ``block`` behavior.
+    The resolved mode is frozen into the file on the first write, so a later
+    default change can never silently flip an existing install.
+
+``import_private``
+    ``true`` sends ``is_private=1`` so runs outside a block are visible only on
+    the owner's profile. Off by default (the server's public default).
+
 Only the key *prefix* (``lrf_...`` first 12 chars, same as the site's profile
 page shows) is ever returned to UI callers — never the full key.
 """
@@ -19,6 +34,10 @@ from typing import Any, Dict, Optional, Tuple
 from . import paths
 
 DEFAULT_REMOTE_URL = "https://www.letsrunfaster.com/api/activities/import"
+
+REMOTE_MODES = ("block", "auto", "activity")
+DEFAULT_REMOTE_MODE = "auto"
+LEGACY_REMOTE_MODE = "block"
 
 
 def canonicalize_url(url: str) -> str:
@@ -58,21 +77,84 @@ def load_config() -> Dict[str, Any]:
         return {}
 
 
+def normalize_remote_mode(value: Optional[str]) -> Optional[str]:
+    """Validate a mode; ``None``/blank means "no opinion" (keep saved/default).
+
+    Raises ``ValueError`` for an unknown non-blank value so callers can return
+    a 400 instead of silently keeping a mode the runner did not choose.
+    """
+    if value is None:
+        return None
+    mode = str(value).strip().lower()
+    if not mode:
+        return None
+    if mode not in REMOTE_MODES:
+        raise ValueError(f"remote mode must be one of: {', '.join(REMOTE_MODES)}")
+    return mode
+
+
+def resolve_remote_mode(cfg: Optional[Dict[str, Any]] = None) -> str:
+    """Effective mode, including the upgrade-safe default.
+
+    No saved settings at all = fresh install = ``auto``. A config written
+    before modes existed has no ``remote_mode`` key, so it keeps ``block``
+    until the runner opts in; ``save_config`` then freezes that choice.
+    """
+    cfg = load_config() if cfg is None else cfg
+    raw = cfg.get("remote_mode")
+    if isinstance(raw, str) and raw.strip().lower() in REMOTE_MODES:
+        return raw.strip().lower()
+    return LEGACY_REMOTE_MODE if cfg else DEFAULT_REMOTE_MODE
+
+
+def get_import_private(cfg: Optional[Dict[str, Any]] = None) -> bool:
+    """Whether new runs outside a block should be private (default public)."""
+    cfg = load_config() if cfg is None else cfg
+    return bool(cfg.get("import_private", False))
+
+
+def site_url_for(remote_url: Optional[str], path: str) -> Optional[str]:
+    """Absolute site URL for a relative import response path.
+
+    The server returns ``/activity/514`` or ``/block/7``; the UI needs a
+    clickable absolute link. The import URL already names the site, so drop
+    its ``/api/...`` suffix. Absolute paths pass through untouched.
+    """
+    cleaned = (path or "").strip()
+    if not cleaned:
+        return None
+    if cleaned.startswith(("http://", "https://")):
+        return cleaned
+    base = canonicalize_url(
+        (remote_url or "").strip() or load_config().get("remote_url") or DEFAULT_REMOTE_URL
+    )
+    marker = base.find("/api/")
+    base = base[:marker] if marker != -1 else base.rstrip("/")
+    return base.rstrip("/") + "/" + cleaned.lstrip("/")
+
+
 def save_config(
     remote_url: Optional[str] = None,
     remote_api_key: Optional[str] = None,
     clear_key: bool = False,
     push_enabled: Optional[bool] = None,
     export_dir: Optional[str] = None,
+    remote_mode: Optional[str] = None,
+    import_private: Optional[bool] = None,
 ) -> Dict[str, Any]:
     """Merge one or both push settings into the settings file.
 
     ``remote_api_key=None`` leaves the stored key untouched; ``clear_key=True``
     (or an empty-string key) removes it. ``export_dir=""`` clears the saved
-    destination. Returns the stored mapping minus the secret (``remote_url``,
-    ``has_key``, ``key_prefix``).
+    destination. ``remote_mode=""`` removes an explicit mode (back to the
+    resolved default); an unknown mode raises ``ValueError``. Returns the
+    stored mapping minus the secret (``remote_url``, ``has_key``,
+    ``key_prefix``, ``remote_mode``, ``import_private``).
     """
     cfg = load_config()
+    # Freeze the resolved default on the first write. Done before this write
+    # can add keys, so "fresh" is judged on the config that existed.
+    frozen_mode = resolve_remote_mode(cfg) if "remote_mode" not in cfg else None
     if remote_url is not None:
         cleaned = canonicalize_url(remote_url)
         if cleaned:
@@ -94,6 +176,17 @@ def save_config(
         else:
             cfg.pop("export_dir", None)
 
+    if remote_mode is not None:
+        cleaned_mode = normalize_remote_mode(remote_mode)
+        if cleaned_mode:
+            cfg["remote_mode"] = cleaned_mode
+        else:
+            cfg.pop("remote_mode", None)
+    elif frozen_mode:
+        cfg["remote_mode"] = frozen_mode
+    if import_private is not None:
+        cfg["import_private"] = bool(import_private)
+
     path = config_path()
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_suffix(".tmp")
@@ -110,6 +203,8 @@ def public_config(cfg: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     """Settings safe to return to UI callers (prefix, never the secret)."""
     cfg = cfg if cfg is not None else load_config()
     key = cfg.get("remote_api_key") or ""
+    raw_mode = cfg.get("remote_mode")
+    explicit_mode = isinstance(raw_mode, str) and raw_mode.strip().lower() in REMOTE_MODES
     return {
         "remote_url": cfg.get("remote_url") or DEFAULT_REMOTE_URL,
         "url_customized": bool(cfg.get("remote_url")),
@@ -120,15 +215,31 @@ def public_config(cfg: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         # so anything stored there would be silently lost each restart.
         "push_enabled": bool(cfg.get("push_enabled", True)),
         "export_dir": cfg.get("export_dir") or None,
+        "remote_mode": resolve_remote_mode(cfg),
+        # False means the displayed mode is the upgrade-safe fallback, not a
+        # choice the runner made. The UI explains that once, instead of
+        # pretending a legacy config opted into auto.
+        "remote_mode_explicit": explicit_mode,
+        "import_private": get_import_private(cfg),
+    }
+
+
+def get_push_settings() -> Dict[str, Any]:
+    """Resolved push target for an export (never the raw secret listing)."""
+    cfg = load_config()
+    url = canonicalize_url(cfg.get("remote_url") or DEFAULT_REMOTE_URL) or DEFAULT_REMOTE_URL
+    return {
+        "remote_url": url,
+        "remote_api_key": (cfg.get("remote_api_key") or "").strip() or None,
+        "remote_mode": resolve_remote_mode(cfg),
+        "import_private": get_import_private(cfg),
     }
 
 
 def get_remote_settings() -> Tuple[Optional[str], Optional[str]]:
     """Saved (url, key) pair; key is None when never saved."""
-    cfg = load_config()
-    url = canonicalize_url(cfg.get("remote_url") or DEFAULT_REMOTE_URL) or DEFAULT_REMOTE_URL
-    key = (cfg.get("remote_api_key") or "").strip() or None
-    return url, key
+    push = get_push_settings()
+    return push["remote_url"], push["remote_api_key"]
 
 
 def resolve_latest_url(remote_url: Optional[str] = None) -> str:

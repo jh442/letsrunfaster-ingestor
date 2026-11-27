@@ -14,6 +14,7 @@ import requests
 from garminconnect import Garmin
 
 from .fit_parser import parse_fit_to_payload
+from . import settings as app_settings
 
 
 class ExportFormat(str, Enum):
@@ -59,6 +60,80 @@ class ExportResult:
     remote_matched: Optional[bool] = None
     remote_detail: Optional[str] = None
     remote_converted_plan: bool = False
+    # Non-block awareness (server `linkage`, added with independent runs).
+    # `remote_linkage` is "block" when an older server omits the key, so the
+    # UI can keep its legacy mapping without guessing from `matched`.
+    remote_linkage: Optional[str] = None
+    remote_created: Optional[bool] = None
+    remote_deleted: bool = False
+    remote_social_activity_id: Optional[int] = None
+    remote_activity_url: Optional[str] = None
+
+
+def _int_or_none(value: Any) -> Optional[int]:
+    """Tolerant int coercion for JSON ids (old servers, string ids)."""
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value
+    if isinstance(value, str) and value.strip().isdigit():
+        return int(value.strip())
+    return None
+
+
+def parse_remote_response(body: Any, remote_url: Optional[str]) -> Dict[str, Any]:
+    """Map an import response body onto the remote_* result fields.
+
+    Tolerant by design: the ingestor must keep working against an older site
+    that has no ``linkage`` and returns ``no_block_found``. A missing key means
+    legacy/block, never "assume the caller wanted a run" — only the server's
+    explicit ``linkage:"nonblock"`` enables the run status.
+    """
+    mapped: Dict[str, Any] = {
+        "remote_matched": None,
+        "remote_detail": None,
+        "remote_converted_plan": False,
+        "remote_linkage": None,
+        "remote_created": None,
+        "remote_deleted": False,
+        "remote_social_activity_id": None,
+        "remote_activity_url": None,
+    }
+    if not isinstance(body, dict):
+        return mapped
+
+    linkage = body.get("linkage")
+    linkage = linkage.strip().lower() if isinstance(linkage, str) else ""
+    mapped["remote_linkage"] = linkage if linkage in ("block", "nonblock") else "block"
+    if "matched" in body:
+        mapped["remote_matched"] = bool(body["matched"])
+    if "created" in body:
+        mapped["remote_created"] = bool(body["created"])
+    mapped["remote_deleted"] = bool(body.get("deleted"))
+    mapped["remote_converted_plan"] = bool(body.get("converted_plan"))
+    mapped["remote_social_activity_id"] = _int_or_none(body.get("social_activity_id"))
+    url = body.get("url")
+    if isinstance(url, str) and url.strip():
+        mapped["remote_activity_url"] = app_settings.site_url_for(remote_url, url)
+
+    if mapped["remote_deleted"]:
+        # The owner deleted this run on the site. The unique key survives, so
+        # a re-push is a deliberate no-op rather than a resurrection.
+        mapped["remote_detail"] = "deleted"
+    elif mapped["remote_linkage"] == "nonblock":
+        if mapped["remote_created"]:
+            mapped["remote_detail"] = "run"
+        elif body.get("deduped"):
+            mapped["remote_detail"] = "duplicate"
+        else:
+            mapped["remote_detail"] = str(body.get("code") or "")
+    elif body.get("deduped"):
+        mapped["remote_detail"] = "duplicate"
+    elif body.get("replaced"):
+        mapped["remote_detail"] = "updated:" + str(body.get("slot") or "")
+    else:
+        mapped["remote_detail"] = str(body.get("code") or body.get("appended_to") or "")
+    return mapped
 
 
 def sort_activities_oldest_first(activities: List[ActivityItem]) -> List[ActivityItem]:
@@ -151,8 +226,17 @@ class GarminExporter:
         output_dir: Optional[Path] = None,
         remote_url: Optional[str] = None,
         remote_api_key: Optional[str] = None,
+        remote_mode: Optional[str] = None,
+        import_private: bool = False,
     ) -> ExportResult:
-        """Download single activity, save locally and/or push to remote API."""
+        """Download single activity, save locally and/or push to remote API.
+
+        ``remote_mode`` is sent as a **form field** (never a query parameter):
+        the saved target is suffix-matched to derive ``/activities/latest``, so
+        appending ``?mode=`` would break sync-new. Older servers ignore it.
+        ``import_private`` sends ``is_private=1`` only when enabled, leaving the
+        server's public default untouched otherwise.
+        """
         try:
             data, ext = self.download_activity_data(activity.activity_id, export_format)
             
@@ -170,9 +254,7 @@ class GarminExporter:
                 saved_path_str = str(file_dest)
 
             remote_synced = False
-            remote_matched: Optional[bool] = None
-            remote_detail: Optional[str] = None
-            remote_converted_plan = False
+            remote_fields: Dict[str, Any] = parse_remote_response(None, remote_url)
             if remote_url:
                 headers = {}
                 if remote_api_key:
@@ -188,6 +270,12 @@ class GarminExporter:
                     "start_time": activity.start_time_local,
                     "format": ext,
                 }
+                # Additive contract: absent `mode` is the legacy block path,
+                # so an old server simply ignores these fields.
+                if remote_mode:
+                    form_data["mode"] = str(remote_mode)
+                if import_private:
+                    form_data["is_private"] = "1"
                 # Parsed payload (mirrors the site's ParsedGpxResult) so the
                 # import endpoint can append to the matching block day.
                 # FIT only — GPX/TCX send thin metadata + file.
@@ -204,22 +292,27 @@ class GarminExporter:
                     if activity.distance_meters:
                         form_data["distance_miles"] = str(round(activity.distance_meters * 0.000621371, 2))
                 resp = requests.post(remote_url, headers=headers, data=form_data, files=files, timeout=30)
-                resp.raise_for_status()
+                try:
+                    resp.raise_for_status()
+                except requests.HTTPError as exc:
+                    # 4xx/5xx bodies carry the actionable message ("mode must
+                    # be...", "Unauthorized..."). Surface it on that activity's
+                    # result instead of aborting the whole export with a bare
+                    # "422 Client Error".
+                    detail = ""
+                    try:
+                        body = resp.json()
+                        if isinstance(body, dict):
+                            detail = str(body.get("error") or body.get("message") or "")
+                    except Exception:
+                        detail = str(getattr(resp, "text", "") or "")[:200]
+                    raise RuntimeError(f"{exc}" + (f" — {detail}" if detail else "")) from exc
                 remote_synced = True
                 try:
-                    body = resp.json()
-                    if isinstance(body, dict):
-                        if "matched" in body:
-                            remote_matched = bool(body["matched"])
-                        if body.get("converted_plan"):
-                            remote_converted_plan = True
-                        if body.get("deduped"):
-                            remote_detail = "duplicate"
-                        elif body.get("replaced"):
-                            remote_detail = "updated:" + str(body.get("slot") or "")
-                        else:
-                            remote_detail = str(body.get("code") or body.get("appended_to") or "")
+                    remote_fields = parse_remote_response(resp.json(), remote_url)
                 except Exception:
+                    # A 200 with a non-JSON body (proxy page) still means the
+                    # file landed; keep the legacy empty mapping.
                     pass
 
             return ExportResult(
@@ -230,9 +323,7 @@ class GarminExporter:
                 size_bytes=len(data),
                 saved_path=saved_path_str,
                 remote_synced=remote_synced,
-                remote_matched=remote_matched,
-                remote_detail=remote_detail,
-                remote_converted_plan=remote_converted_plan,
+                **remote_fields,
             )
 
         except Exception as e:
@@ -255,6 +346,8 @@ class GarminExporter:
         remote_api_key: Optional[str] = None,
         delay_seconds: float = 0.5,
         progress_callback: Optional[Callable[[int, int, ExportResult], None]] = None,
+        remote_mode: Optional[str] = None,
+        import_private: bool = False,
     ) -> List[ExportResult]:
         """Bulk export multiple activities with rate-limiting backoff."""
         results: List[ExportResult] = []
@@ -268,6 +361,8 @@ class GarminExporter:
                 output_dir=output_dir,
                 remote_url=remote_url,
                 remote_api_key=remote_api_key,
+                remote_mode=remote_mode,
+                import_private=import_private,
             )
             results.append(res)
             if progress_callback:

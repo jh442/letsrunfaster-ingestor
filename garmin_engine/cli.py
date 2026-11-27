@@ -18,6 +18,21 @@ app = typer.Typer(
 )
 console = Console()
 
+MODE_HELP = {
+    "block": "block days only; runs outside a block are skipped",
+    "auto": "block day when the date matches, otherwise a run on your feed",
+    "activity": "always a run; existing block days are left alone",
+}
+
+
+def _validated_mode(mode: Optional[str]) -> Optional[str]:
+    """Validate ``--remote-mode`` and turn a bad value into a CLI usage error."""
+    try:
+        app_settings.normalize_remote_mode(mode)
+    except ValueError as exc:
+        raise typer.BadParameter(str(exc), param_hint="--remote-mode")
+    return mode
+
 
 def _version_callback(value: bool) -> None:
     if value:
@@ -145,26 +160,53 @@ def list_activities(
 def configure(
     remote_url: Optional[str] = typer.Option(None, "--remote-url", help="LetsRunFaster ingest URL to save"),
     remote_key: Optional[str] = typer.Option(None, "--remote-key", help="LetsRunFaster API key to save (lrf_...)"),
+    remote_mode: Optional[str] = typer.Option(
+        None, "--remote-mode",
+        help="What to do with runs outside a block: block, auto, or activity",
+    ),
+    private_imports: Optional[bool] = typer.Option(
+        None, "--private/--public",
+        help="Import runs outside a block as private (profile only)",
+    ),
     clear_key: bool = typer.Option(False, "--clear-key", help="Forget the saved API key"),
     show: bool = typer.Option(False, "--show", help="Show saved settings (key prefix only)"),
 ):
     """Save/show the LetsRunFaster push target used by default on export."""
-    if show or (remote_url is None and remote_key is None and not clear_key):
+    if show or (remote_url is None and remote_key is None and remote_mode is None
+                and private_imports is None and not clear_key):
         saved = app_settings.public_config()
+        mode = saved["remote_mode"]
         console.print(f"Target URL: [bold]{saved['remote_url']}[/bold]")
         if saved["has_key"]:
             console.print(f"API key: [green]saved ({saved['key_prefix']}...)[/green]")
         else:
             console.print("[yellow]API key: not saved[/yellow]")
+        console.print(f"Import mode: [bold]{mode}[/bold] [dim]({MODE_HELP.get(mode, '')})[/dim]")
+        if not saved["remote_mode_explicit"]:
+            console.print(
+                "[dim]Existing setup: kept on block until you choose "
+                "--remote-mode auto or activity.[/dim]"
+            )
+        visibility = "private" if saved["import_private"] else "public"
+        console.print(f"Runs outside a block: [bold]{visibility}[/bold]")
         return
+    _validated_mode(remote_mode)
     saved = app_settings.save_config(
-        remote_url=remote_url, remote_api_key=remote_key, clear_key=clear_key
+        remote_url=remote_url,
+        remote_api_key=remote_key,
+        clear_key=clear_key,
+        remote_mode=remote_mode,
+        import_private=private_imports,
     )
     console.print(f"[green]✓ Saved push target:[/green] [bold]{saved['remote_url']}[/bold]")
     if saved["has_key"]:
         console.print(f"API key: [green]saved ({saved['key_prefix']}...)[/green]")
     elif clear_key:
         console.print("[yellow]API key cleared.[/yellow]")
+    mode = saved["remote_mode"]
+    console.print(f"Import mode: [bold]{mode}[/bold] [dim]({MODE_HELP.get(mode, '')})[/dim]")
+    visibility = "private" if saved["import_private"] else "public"
+    console.print(f"Runs outside a block: [bold]{visibility}[/bold]")
 
 
 @app.command()
@@ -175,10 +217,19 @@ def export(
     output_dir: Optional[str] = typer.Option("./garmin_exports", "--output", "-o", help="Local directory to save files"),
     remote_url: Optional[str] = typer.Option(None, "--remote-url", help="Target API URL for pushing activity files"),
     remote_api_key: Optional[str] = typer.Option(None, "--remote-key", help="API key for remote target Authorization header"),
+    remote_mode: Optional[str] = typer.Option(
+        None, "--remote-mode",
+        help="Override the saved mode for this run: block, auto, or activity",
+    ),
+    private_imports: Optional[bool] = typer.Option(
+        None, "--private/--public",
+        help="Override the saved visibility for runs outside a block",
+    ),
     activity_type: Optional[str] = typer.Option(None, "--type", "-t", help="Filter by activity type"),
     delay: float = typer.Option(0.5, "--delay", help="Delay in seconds between requests to avoid rate limits"),
 ):
     """Bulk download activities between start and end dates."""
+    _validated_mode(remote_mode)
     auth_mgr = GarminAuthManager()
     auth_res = auth_mgr.login_with_tokens()
     if auth_res.status != AuthStatus.AUTHENTICATED:
@@ -186,15 +237,19 @@ def export(
         raise typer.Exit(code=1)
 
     # Omitted flags fall back to saved `configure` settings ("" disables push).
-    saved_url, saved_key = app_settings.get_remote_settings()
+    saved = app_settings.get_push_settings()
     if remote_url is None:
-        remote_url = saved_url
+        remote_url = saved["remote_url"]
     elif not remote_url.strip():
         remote_url = None
     if remote_api_key is None:
-        remote_api_key = saved_key
+        remote_api_key = saved["remote_api_key"]
     elif not remote_api_key.strip():
         remote_api_key = None
+    if remote_mode is None:
+        remote_mode = saved["remote_mode"]
+    if private_imports is None:
+        private_imports = saved["import_private"]
 
     client = auth_mgr.get_client()
     client.login(tokenstore=auth_mgr.token_store)
@@ -212,7 +267,10 @@ def export(
     if dest_path:
         console.print(f"Saving to directory: [bold]{dest_path.resolve()}[/bold]")
     if remote_url:
-        console.print(f"Syncing to remote API: [bold]{remote_url}[/bold]")
+        console.print(
+            f"Syncing to remote API: [bold]{remote_url}[/bold] "
+            f"[dim](mode={remote_mode}; {'private' if private_imports else 'public'} runs)[/dim]"
+        )
 
     with Progress(
         SpinnerColumn(),
@@ -234,6 +292,8 @@ def export(
             remote_api_key=remote_api_key,
             delay_seconds=delay,
             progress_callback=on_progress,
+            remote_mode=remote_mode,
+            import_private=bool(private_imports),
         )
 
     successful = [r for r in results if r.success]
@@ -241,6 +301,24 @@ def export(
 
     console.print("\n[bold]Export Summary:[/bold]")
     console.print(f"  ✓ Successfully downloaded: [green]{len(successful)}[/green]")
+    pushed = [r for r in successful if r.remote_synced]
+    if pushed:
+        block_days = [r for r in pushed if r.remote_linkage == "block" and r.remote_detail not in ("duplicate", "deleted")]
+        run_posts = [r for r in pushed if r.remote_linkage == "nonblock" and r.remote_detail == "run"]
+        duplicates = [r for r in pushed if r.remote_detail == "duplicate"]
+        deleted = [r for r in pushed if r.remote_detail == "deleted"]
+        console.print(f"  ↳ Pushed to LetsRunFaster: [cyan]{len(pushed)}[/cyan]")
+        if block_days:
+            console.print(f"      Block days: {len(block_days)}")
+        if run_posts:
+            console.print(f"      Runs outside a block: {len(run_posts)}")
+        if duplicates:
+            console.print(f"      Duplicates skipped: [dim]{len(duplicates)}[/dim]")
+        if deleted:
+            console.print(f"      Already deleted on the site: [dim]{len(deleted)}[/dim]")
+        no_block = [r for r in pushed if r.remote_detail == "no_block_found"]
+        if no_block:
+            console.print(f"      No block for date: [yellow]{len(no_block)}[/yellow]")
     if failed:
         console.print(f"  ✗ Failed: [red]{len(failed)}[/red]")
         for f in failed:

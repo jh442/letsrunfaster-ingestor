@@ -5,7 +5,7 @@
 verify it launched the engine it shipped.
 """
 
-__version__ = "0.2.2"
+__version__ = "0.3.0"
 
 
 def get_version() -> str:

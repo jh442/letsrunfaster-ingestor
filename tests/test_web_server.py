@@ -141,6 +141,12 @@ class TestWebServer(unittest.TestCase):
         self.assertNotIn("localStorage", js.text)
         self.assertIn("push_enabled", js.text)
         self.assertIn("export_dir", js.text)
+        self.assertIn("remote_mode", js.text)
+        self.assertIn("import_private", js.text)
+        # The mode control and private toggle are part of the built page.
+        self.assertIn('id="remote-mode-group"', index.text)
+        self.assertIn('id="private-import"', index.text)
+        self.assertIn('data-mode="auto"', index.text)
         # Progress text is announced rather than only painted.
         self.assertIn('id="progress-current-item" aria-live="polite"', index.text)
 
@@ -215,6 +221,73 @@ class TestRemoteSettings(unittest.TestCase):
         self.assertEqual(data["remote_url"], app_settings.DEFAULT_REMOTE_URL)
         self.assertFalse(data["has_key"])
         self.assertIsNone(data["key_prefix"])
+        # Fresh install: auto is the point of the non-block feature.
+        self.assertEqual(data["remote_mode"], "auto")
+        self.assertFalse(data["remote_mode_explicit"])
+        self.assertFalse(data["import_private"])
+
+    def test_legacy_config_keeps_block_until_opted_in(self):
+        # A config written before modes existed must not start publishing
+        # unmatched runs on upgrade.
+        Path(self.cfg_path).write_text(json.dumps({"remote_api_key": "lrf_legacy123456"}))
+        data = client.get("/api/settings/remote").json()
+        self.assertEqual(data["remote_mode"], "block")
+        self.assertFalse(data["remote_mode_explicit"])
+
+        saved = client.post("/api/settings/remote", json={"remote_mode": "auto"}).json()
+        self.assertEqual(saved["remote_mode"], "auto")
+        self.assertTrue(saved["remote_mode_explicit"])
+
+    def test_mode_and_private_roundtrip(self):
+        resp = client.post(
+            "/api/settings/remote",
+            json={"remote_mode": "activity", "import_private": True},
+        )
+        self.assertEqual(resp.status_code, 200)
+        data = resp.json()
+        self.assertEqual(data["remote_mode"], "activity")
+        self.assertTrue(data["import_private"])
+
+        reloaded = client.get("/api/settings/remote").json()
+        self.assertEqual(reloaded["remote_mode"], "activity")
+        self.assertTrue(reloaded["import_private"])
+
+        client.post("/api/settings/remote", json={"import_private": False})
+        self.assertFalse(client.get("/api/settings/remote").json()["import_private"])
+
+    def test_unknown_mode_is_rejected(self):
+        resp = client.post("/api/settings/remote", json={"remote_mode": "everything"})
+        self.assertEqual(resp.status_code, 400)
+        self.assertIn("block", resp.json()["detail"])
+
+    def test_first_save_freezes_resolved_default(self):
+        # No config content yet => fresh install => auto is written on the
+        # first write so changing the built-in default later cannot flip it.
+        client.post("/api/settings/remote", json={"push_enabled": False})
+        stored = json.loads(Path(self.cfg_path).read_text())
+        self.assertEqual(stored["remote_mode"], "auto")
+        data = client.get("/api/settings/remote").json()
+        self.assertEqual(data["remote_mode"], "auto")
+        self.assertTrue(data["remote_mode_explicit"])
+
+    def test_site_url_for_relative_paths(self):
+        self.assertEqual(
+            app_settings.site_url_for(
+                "https://www.letsrunfaster.com/api/activities/import", "/activity/514"
+            ),
+            "https://www.letsrunfaster.com/activity/514",
+        )
+        self.assertEqual(
+            app_settings.site_url_for(
+                "https://letsrunfaster.com/api/activities/import", "/block/7"
+            ),
+            "https://www.letsrunfaster.com/block/7",
+        )
+        self.assertEqual(
+            app_settings.site_url_for("https://example.com/api/activities/import", "https://x.test/a"),
+            "https://x.test/a",
+        )
+        self.assertIsNone(app_settings.site_url_for(None, ""))
 
     def test_save_and_reload_roundtrip(self):
         resp = client.post(

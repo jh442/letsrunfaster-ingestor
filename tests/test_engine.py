@@ -4,6 +4,7 @@ import unittest
 from unittest.mock import MagicMock, patch
 import io
 import zipfile
+import requests
 from garmin_engine.auth import GarminAuthManager, AuthStatus
 from garmin_engine.fit_parser import (
     _build_canonical_time_series,
@@ -14,6 +15,7 @@ from garmin_engine.exporter import (
     GarminExporter,
     ActivityItem,
     ExportFormat,
+    parse_remote_response,
     sanitize_filename,
     sort_activities_oldest_first,
 )
@@ -63,6 +65,150 @@ class TestGarminEngine(unittest.TestCase):
             mgr = GarminAuthManager(token_dir=tmpdir)
             res = mgr.login_with_tokens()
             self.assertEqual(res.status, AuthStatus.FAILED)
+
+
+class TestRemoteResponseMapping(unittest.TestCase):
+    """Non-block results must not be confused with the legacy block shapes."""
+
+    def test_block_append_without_linkage_is_legacy_block(self):
+        mapped = parse_remote_response(
+            {"ok": True, "matched": True, "appended_to": "primary"},
+            "https://www.letsrunfaster.com/api/activities/import",
+        )
+        self.assertEqual(mapped["remote_linkage"], "block")
+        self.assertIs(mapped["remote_matched"], True)
+        self.assertEqual(mapped["remote_detail"], "primary")
+        self.assertIsNone(mapped["remote_created"])
+
+    def test_block_replace_and_dedupe(self):
+        replaced = parse_remote_response({"matched": True, "replaced": True, "slot": "second"}, None)
+        self.assertEqual(replaced["remote_detail"], "updated:second")
+
+        deduped = parse_remote_response({"matched": True, "deduped": True}, None)
+        self.assertEqual(deduped["remote_detail"], "duplicate")
+
+    def test_block_converted_plan(self):
+        mapped = parse_remote_response(
+            {"matched": True, "converted_plan": True, "appended_to": "primary"}, None
+        )
+        self.assertTrue(mapped["remote_converted_plan"])
+        self.assertEqual(mapped["remote_detail"], "primary")
+
+    def test_no_block_found_stays_legacy(self):
+        mapped = parse_remote_response(
+            {"matched": False, "code": "no_block_found"}, None
+        )
+        self.assertEqual(mapped["remote_linkage"], "block")
+        self.assertIs(mapped["remote_matched"], False)
+        self.assertEqual(mapped["remote_detail"], "no_block_found")
+
+    def test_nonblock_created_maps_to_run_and_absolute_url(self):
+        mapped = parse_remote_response(
+            {
+                "matched": False, "linkage": "nonblock", "created": True,
+                "social_activity_id": 514, "url": "/activity/514",
+            },
+            "https://www.letsrunfaster.com/api/activities/import",
+        )
+        self.assertEqual(mapped["remote_linkage"], "nonblock")
+        self.assertIs(mapped["remote_created"], True)
+        self.assertEqual(mapped["remote_detail"], "run")
+        self.assertEqual(mapped["remote_social_activity_id"], 514)
+        self.assertEqual(mapped["remote_activity_url"], "https://www.letsrunfaster.com/activity/514")
+
+    def test_nonblock_dedupe_and_deleted(self):
+        deduped = parse_remote_response(
+            {"linkage": "nonblock", "created": False, "deduped": True, "social_activity_id": "9"},
+            None,
+        )
+        self.assertEqual(deduped["remote_detail"], "duplicate")
+        self.assertEqual(deduped["remote_social_activity_id"], 9)
+
+        deleted = parse_remote_response(
+            {"linkage": "nonblock", "deduped": True, "deleted": True}, None
+        )
+        self.assertTrue(deleted["remote_deleted"])
+        self.assertEqual(deleted["remote_detail"], "deleted")
+
+    def test_malformed_body_is_harmless(self):
+        for body in (None, [], "nonsense"):
+            mapped = parse_remote_response(body, None)
+            self.assertIsNone(mapped["remote_linkage"])
+            self.assertIsNone(mapped["remote_detail"])
+
+
+class TestRemoteRequest(unittest.TestCase):
+    """mode/is_private ride in the form body, never in the URL."""
+
+    def _export(self, response_body, **kwargs):
+        client_mock = MagicMock()
+        client_mock.download_activity.return_value = b"<gpx></gpx>"
+        exporter = GarminExporter(client_mock)
+        activity = ActivityItem(
+            activity_id=24974201517,
+            activity_name="Ballwin Run",
+            activity_type="running",
+            start_time_local="2026-09-28 07:00:00",
+            distance_meters=8000.0,
+        )
+        resp = MagicMock()
+        resp.json.return_value = response_body
+        with patch("garmin_engine.exporter.requests.post", return_value=resp) as post:
+            result = exporter.export_activity(
+                activity,
+                ExportFormat.GPX,
+                remote_url="https://www.letsrunfaster.com/api/activities/import",
+                remote_api_key="lrf_secret",
+                remote_mode=kwargs.get("remote_mode", "auto"),
+                import_private=kwargs.get("import_private", False),
+            )
+        return result, post
+
+    def test_mode_is_a_form_field_not_a_query_parameter(self):
+        result, post = self._export(
+            {"matched": False, "linkage": "nonblock", "created": True,
+             "social_activity_id": 514, "url": "/activity/514"},
+        )
+        called_url = post.call_args.args[0]
+        form = post.call_args.kwargs["data"]
+        self.assertEqual(called_url, "https://www.letsrunfaster.com/api/activities/import")
+        self.assertNotIn("mode=", called_url)
+        self.assertEqual(form["mode"], "auto")
+        self.assertNotIn("is_private", form)
+        self.assertEqual(result.remote_linkage, "nonblock")
+        self.assertEqual(result.remote_detail, "run")
+        self.assertTrue(result.remote_synced)
+
+    def test_private_import_sends_flag(self):
+        _, post = self._export({}, remote_mode="activity", import_private=True)
+        form = post.call_args.kwargs["data"]
+        self.assertEqual(form["mode"], "activity")
+        self.assertEqual(form["is_private"], "1")
+
+    def test_legacy_server_response_maps_to_block(self):
+        result, _ = self._export({"matched": False, "code": "no_block_found"})
+        self.assertEqual(result.remote_linkage, "block")
+        self.assertEqual(result.remote_detail, "no_block_found")
+
+    def test_http_error_surfaces_server_message_without_aborting(self):
+        client_mock = MagicMock()
+        client_mock.download_activity.return_value = b"<gpx></gpx>"
+        exporter = GarminExporter(client_mock)
+        activity = ActivityItem(
+            activity_id=1, activity_name="run", activity_type="running",
+            start_time_local="2026-09-28 07:00:00",
+        )
+        resp = MagicMock()
+        resp.raise_for_status.side_effect = requests.HTTPError("422 Client Error")
+        resp.json.return_value = {"error": "mode must be block, auto or activity"}
+        with patch("garmin_engine.exporter.requests.post", return_value=resp):
+            result = exporter.export_activity(
+                activity, ExportFormat.GPX,
+                remote_url="https://www.letsrunfaster.com/api/activities/import",
+                remote_mode="auto",
+            )
+        self.assertFalse(result.success)
+        self.assertIn("mode must be block", result.error_message)
 
 
 class TestFitTelemetryShape(unittest.TestCase):
